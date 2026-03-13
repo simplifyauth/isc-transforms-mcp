@@ -1,0 +1,29 @@
+# Source files — not needed at runtime
+src/
+*.ts
+tsconfig.json
+tsconfig*.json
+
+# Server-side only (Hostinger hosted mode) — not part of the npm package
+dist/server.js
+dist/apikeys.js
+dist/cli/
+
+# Old modules (pre-refactor, unused in published package)
+dist/forms/
+dist/workflows/
+
+# Deployment configs
+ecosystem.config.cjs
+nginx.conf.template
+
+# Dev / local files
+.env
+.env.*
+data/
+logs/
+
+# Misc
+*.bkp.*
+*.log
+claude_desktop_config_snippet.json

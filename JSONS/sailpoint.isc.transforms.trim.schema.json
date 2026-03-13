@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.trim.schema.json",
+  "title": "SailPoint ISC Transform Schema - trim",
+  "description": "Strict schema derived from SailPoint official Trim operation documentation. Trims whitespace from both the beginning and ending of the input string. Docs state the transform only requires top-level 'type' and 'name', and also document an optional 'attributes' object with optional 'input' for explicit input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "trim"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of the identity refresh process. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Optional configuration. Only 'input' is documented.",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "Optional explicit input passed into the transform. If not provided, the transform uses UI-configured input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as explicit input (docs examples use a nested static transform).",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform (may be omitted for operations without attributes)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "trim",
+      "name": "Trim Transform"
+    },
+    {
+      "type": "trim",
+      "name": "Trim Transform (Explicit Input)",
+      "attributes": {
+        "input": {
+          "type": "static",
+          "attributes": {
+            "value": " Vice President"
+          }
+        }
+      }
+    }
+  ]
+}

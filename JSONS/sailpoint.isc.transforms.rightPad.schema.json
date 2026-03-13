@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.rightPad.schema.json",
+  "title": "SailPoint ISC Transform Schema - rightPad",
+  "description": "Strict schema derived from the SailPoint official Right Pad operation documentation. Adds padding to the right of an incoming string to the specified length using an optional padding string (default single space).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "rightPad"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "length"
+      ],
+      "properties": {
+        "length": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Desired output length after padding."
+        },
+        "padding": {
+          "type": "string",
+          "default": " ",
+          "description": "Padding string to use (default is a single space)."
+        },
+        "input": {
+          "description": "Optional explicit input string (nested transform). If omitted, uses UI-configured input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as explicit input (name optional in docs).",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "rightPad",
+      "name": "Right Pad Transform",
+      "attributes": {
+        "length": 10,
+        "padding": "0"
+      }
+    }
+  ]
+}

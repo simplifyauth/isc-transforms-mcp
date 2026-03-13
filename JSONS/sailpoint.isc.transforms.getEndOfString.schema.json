@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.getEndOfString.schema.json",
+  "title": "SailPoint ISC Transform Schema - Get End of String (rule-backed)",
+  "description": "Strict schema for the SailPoint ISC 'Get End of String' operation. Per SailPoint docs, this is implemented as a rule transform: type must be 'rule' and attributes must target the 'Cloud Services Deployment Utility' rule with operation 'getEndOfString'. numChars is required. Optional explicit input may be provided as a nested transform.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "rule"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "operation",
+        "numChars"
+      ],
+      "properties": {
+        "name": {
+          "const": "Cloud Services Deployment Utility",
+          "description": "Referenced rule name must be 'Cloud Services Deployment Utility'."
+        },
+        "operation": {
+          "const": "getEndOfString",
+          "description": "Operation must be 'getEndOfString'."
+        },
+        "numChars": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$",
+          "description": "Number of characters to take from the right side of the input string. Documented as a string."
+        },
+        "input": {
+          "description": "Optional explicit input to the rule-backed operation (nested transform). If omitted, uses implicit input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used for explicit input. Docs examples commonly omit 'name' for nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "rule",
+      "name": "Get End of String Transform",
+      "attributes": {
+        "name": "Cloud Services Deployment Utility",
+        "operation": "getEndOfString",
+        "numChars": "4"
+      }
+    },
+    {
+      "type": "rule",
+      "name": "Get End of String Transform (Explicit Input)",
+      "attributes": {
+        "name": "Cloud Services Deployment Utility",
+        "operation": "getEndOfString",
+        "numChars": "4",
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "employeeId"
+          }
+        }
+      }
+    }
+  ]
+}

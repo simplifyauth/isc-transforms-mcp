@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.concat.schema.json",
+  "title": "SailPoint ISC Transform Schema - concat",
+  "description": "Strict schema derived from the SailPoint official Concatenation operation documentation. Concatenates an array of values (static strings or nested transform objects) into a single string output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "concat"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "values"
+      ],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 2,
+          "description": "Array of items to join. Each item must be a static string or a nested transform object.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/NestedTransform"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used inside other transforms (docs examples often omit 'name' on nested transforms). Operation-specific validation should be applied by the referenced operation schema.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "concat",
+      "name": "Test Concat Transform",
+      "attributes": {
+        "values": [
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "FirstName"
+            }
+          },
+          " ",
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "LastName"
+            }
+          },
+          " (Contractor)"
+        ]
+      }
+    }
+  ]
+}

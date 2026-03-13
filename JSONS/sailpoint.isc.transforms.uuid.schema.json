@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.uuid.schema.json",
+  "title": "SailPoint ISC Transform Schema - uuid",
+  "description": "Strict schema derived from SailPoint official UUID Generator (uuid) transform documentation. Creates a UUID as a 36-character string. This transform only uses top-level properties and has no attributes block.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of the identity refresh process. Default is false."
+    }
+  },
+  "examples": [
+    {
+      "type": "uuid",
+      "name": "UUID Generator Transform"
+    }
+  ]
+}

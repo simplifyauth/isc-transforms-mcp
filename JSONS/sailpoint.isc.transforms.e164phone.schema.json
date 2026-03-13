@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.e164phone.schema.json",
+  "title": "SailPoint ISC Transform Schema - e164phone",
+  "description": "Strict schema derived from SailPoint official E.164 Phone operation documentation. Converts a phone number string into E.164 format. Docs require only top-level 'type' and 'name'. Optional attributes include defaultRegion and input. Runtime null/invalid handling: if input is invalid, transform returns null; if input is null, output is null.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "e164phone"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional configuration.",
+      "properties": {
+        "defaultRegion": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2,
+          "default": "US",
+          "description": "ISO 3166-1 alpha-2 region code used when parsing phone numbers without an explicit country code."
+        },
+        "input": {
+          "description": "Explicit input data passed into the transform (nested transform object). If omitted, uses UI-configured input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used for explicit input. Docs examples commonly omit 'name' for nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "e164phone",
+      "name": "E.164 Phone Transform"
+    },
+    {
+      "type": "e164phone",
+      "name": "E.164 Phone Transform (Default Region)",
+      "attributes": {
+        "defaultRegion": "IN"
+      }
+    },
+    {
+      "type": "e164phone",
+      "name": "E.164 Phone Transform (Explicit Input)",
+      "attributes": {
+        "defaultRegion": "US",
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "phone"
+          }
+        }
+      }
+    }
+  ]
+}

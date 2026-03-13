@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.rule.schema.json",
+  "title": "SailPoint ISC Transform Schema - rule",
+  "description": "Strict schema derived from SailPoint official Rule operation documentation. References (invokes) a Transform rule by name. The attributes object must contain the rule name and may include dynamic variables passed to the rule. Those variables may be static string values or the results of other transforms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "rule"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of the identity refresh process. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Rule configuration + optional dynamic variables (per docs).",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of the Transform rule the transform must invoke."
+        }
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/NestedTransform"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object provided as a dynamic variable. Docs examples show nested transforms sometimes omit 'name' and sometimes omit 'attributes' for operations that don't use them.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform (may be null or omitted for operations that do not use attributes)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "attributes": {
+        "name": "Transform Calculation Rule"
+      },
+      "type": "rule",
+      "name": "Rule Transform"
+    },
+    {
+      "attributes": {
+        "name": "Cloud Services Deployment Utility",
+        "operation": "getEndOfString",
+        "input": {
+          "type": "trim"
+        },
+        "numChars": "3"
+      },
+      "type": "rule",
+      "name": "Rule Transform"
+    }
+  ]
+}

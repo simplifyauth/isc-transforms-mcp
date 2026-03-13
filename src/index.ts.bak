@@ -1,0 +1,1824 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { TRANSFORM_CATALOG, listTransformTypes, lintTransform, toCanonicalType, getTransformSpec } from "./transforms/index.js";
+import { lintWorkflowDefinition } from "./workflows/index.js";
+import { loadConfig } from "./config.js";
+import { createLogger } from "./logger.js";
+import { redactDeep } from "./redact.js";
+import { getAllowlist } from "./allowlist.js";
+import { IScClient } from "./http/iscClient.js";
+import { toSafeError } from "./http/errors.js";
+import { jsonPatch } from "./util/diff.js";
+
+function asText(obj: any): string {
+  return JSON.stringify(obj, null, 2);
+}
+const TOOL_STYLE = (process.env.MCP_TOOL_STYLE ?? "dot").toLowerCase();
+// "dot"  => isc.transforms.catalog
+// "flat" => isc_transforms_catalog   (Claude-safe)
+
+function tn(name: string): string {
+  if (TOOL_STYLE === "flat") {
+    // Replace illegal chars for Claude
+    return name.replace(/[.]/g, "_");
+  }
+  return name;
+}
+
+
+/** Deep-merge `patch` into `base` (objects only). Arrays are replaced, not merged. */
+function deepMerge(base: any, patch: any): any {
+  if (patch === null || patch === undefined) return base;
+  if (Array.isArray(patch)) return patch;
+  if (typeof patch !== "object") return patch;
+  const out: any = Array.isArray(base) ? [...base] : { ...(base && typeof base === "object" ? base : {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    const bv = (out as any)[k];
+    if (v && typeof v === "object" && !Array.isArray(v) && bv && typeof bv === "object" && !Array.isArray(bv)) {
+      (out as any)[k] = deepMerge(bv, v);
+    } else {
+      (out as any)[k] = v;
+    }
+  }
+  return out;
+}
+
+function summarizeLint(lint: { messages: Array<{ level: string; message: string; path?: string }> }) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const infos: string[] = [];
+  for (const m of lint.messages || []) {
+    const line = `${m.path ? m.path + ": " : ""}${m.message}`;
+    if (m.level === "error") errors.push(line);
+    else if (m.level === "warn") warnings.push(line);
+    else infos.push(line);
+  }
+  return { errors, warnings, infos };
+}
+
+type JsonPatchOp = { op: "add" | "remove" | "replace" | "move" | "copy" | "test"; path: string; value?: any; from?: string };
+
+function isReadOnlyWorkflowPath(p: string): boolean {
+  // Conservative list. Many workflow properties are server-managed.
+  // API docs (v3): https://developer.sailpoint.com/docs/api/v3/workflows/
+  return (
+    p === "/id" ||
+    p.startsWith("/id/") ||
+    p === "/created" ||
+    p.startsWith("/created/") ||
+    p === "/modified" ||
+    p.startsWith("/modified/")
+  );
+}
+
+function filterWorkflowPatchOps(ops: any[]): any[] {
+  return (Array.isArray(ops) ? ops : []).filter((op) => !isReadOnlyWorkflowPath(String(op?.path || "")));
+}
+
+function validateWorkflowDefinition(def: any): { ok: boolean; errors: string[]; warnings: string[] } {
+  const lint = lintWorkflowDefinition(def);
+  return { ok: lint.ok, errors: lint.errors, warnings: lint.warnings };
+}
+
+async function fetchAllPaged<T>(
+  isc: IScClient,
+  pathBase: string,
+  limit = 250
+): Promise<T[]> {
+  const out: T[] = [];
+  let offset = 0;
+  while (true) {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    qs.set("offset", String(offset));
+    const path = `${pathBase}?${qs.toString()}`;
+    const page = await isc.request<any>("GET", path);
+    const items: T[] = Array.isArray(page) ? page : Array.isArray(page?.items) ? page.items : [];
+    out.push(...items);
+    if (items.length < limit) break;
+    offset += limit;
+    if (offset > 5000) break; // safety
+  }
+  return out;
+}
+
+function isReadOnlyIdentityProfilePath(p: string): boolean {
+  // per docs, these fields cannot be updated: id, created, modified, identityCount, identityRefreshRequired
+  // Docs: https://developer.sailpoint.com/docs/api/v3/update-identity-profile/
+  return (
+    p === "/id" ||
+    p.startsWith("/id/") ||
+    p === "/created" ||
+    p.startsWith("/created/") ||
+    p === "/modified" ||
+    p.startsWith("/modified/") ||
+    p === "/identityCount" ||
+    p.startsWith("/identityCount/") ||
+    p === "/identityRefreshRequired" ||
+    p.startsWith("/identityRefreshRequired/")
+  );
+}
+
+function filterIdentityProfilePatchOps(ops: any[]): any[] {
+  return (Array.isArray(ops) ? ops : []).filter((op) => !isReadOnlyIdentityProfilePath(String(op?.path || "")));
+}
+
+function jsonPointerEscape(segment: string): string {
+  // RFC6901 JSON Pointer escaping: "~" -> "~0", "/" -> "~1"
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function findJsonPointers(root: any, predicate: (value: any, key?: string) => boolean): Array<{ path: string; value: any }> {
+  const hits: Array<{ path: string; value: any }> = [];
+  const walk = (node: any, path: string, key?: string) => {
+    if (predicate(node, key)) hits.push({ path, value: node });
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i++) walk(node[i], `${path}/${i}`, String(i));
+      return;
+    }
+    if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) walk(v, `${path}/${jsonPointerEscape(k)}`, k);
+    }
+  };
+  walk(root, "");
+  return hits;
+}
+
+async function main() {
+  const cfg = loadConfig();
+  const log = createLogger(cfg.debug);
+  const isc = new IScClient(cfg);
+
+  const server = new McpServer({ name: "isc-lead-dev", version: "0.2.0" });
+
+  // -----------------------
+  // Meta / Health
+  // -----------------------
+  server.registerTool(
+    tn("isc.ping"),
+    {
+      title: "Ping",
+      description: "Basic connectivity check (server-side only).",
+      inputSchema: z.object({})
+    },
+    async () => ({ content: [{ type: "text", text: "pong" }] })
+  );
+
+  server.registerTool(
+    tn("isc.meta.getConfig"),
+    {
+      title: "Get MCP Config",
+      description: "Returns safe runtime config (redacted), allowlist, and base API URL.",
+      inputSchema: z.object({})
+    },
+    async () => {
+      const safe = redactDeep({
+        mode: cfg.mode,
+        apiBaseUrl: cfg.apiBaseUrl,
+        apiVersion: cfg.apiVersion,
+        baseApi: isc.getBaseApi(),
+        timeoutMs: cfg.timeoutMs,
+        debug: cfg.debug,
+        allowlist: getAllowlist()
+      });
+      return { content: [{ type: "text", text: asText(safe) }] };
+    }
+  );
+
+  // -----------------------
+  // Search
+  // -----------------------
+  server.registerTool(
+    tn("isc.search"),
+    {
+      title: "ISC Search",
+      description: "POST /v3/search - Elasticsearch-backed search across tenant indices.",
+      inputSchema: z.object({
+        body: z.any().describe("Search request body (index, query, sort, searchAfter, etc.)"),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ body, traceId }) => {
+      try {
+        log.debug("isc.search", { traceId });
+        const res = await isc.request<any>("POST", "/search", body);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // -----------------------
+  // Transforms (Phase 1)
+  // -----------------------
+  server.registerTool(
+    tn("isc.transforms.list"),
+    {
+      title: "List Transforms",
+      description: "GET /v3/transforms",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).optional(),
+        offset: z.number().int().min(0).optional()
+      })
+    },
+    async ({ limit, offset }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (limit !== undefined) qs.set("limit", String(limit));
+        if (offset !== undefined) qs.set("offset", String(offset));
+        const path = qs.toString() ? `/transforms?${qs}` : "/transforms";
+        const res = await isc.request<any>("GET", path);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+  server.registerTool(
+  tn("isc.transforms.catalog"),
+  {
+    title: "Transform Operations Catalog",
+    description: "Lists supported transform operation types, required attributes, and scaffolds.",
+    inputSchema: {}
+  },
+  async () => {
+    const items = listTransformTypes().map((t) => {
+      const s = TRANSFORM_CATALOG[t];
+      return {
+        type: s.type,
+        title: s.title,
+        requiredAttributes: s.requiredAttributes ?? [],
+        attributesOptional: Boolean(s.attributesOptional),
+        scaffoldExample: s.scaffold(`EXAMPLE-${t}`)
+      };
+    });
+    return { content: [{ type: "text", text: JSON.stringify(items, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  tn("isc.transforms.scaffold"),
+  {
+    title: "Scaffold Transform",
+    description: "Generates a valid starter JSON payload for a given transform operation type.",
+    inputSchema: {
+      type: z.string().min(1),
+      name: z.string().min(1).optional()
+    }
+  },
+  async ({ type, name }) => {
+    const canon = toCanonicalType(String(type));
+    const spec = canon ? getTransformSpec(canon) : undefined;
+
+    if (!canon || !spec) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { error: `Unknown type '${type}'. Try isc.transforms.catalog.` },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+
+    const payload = spec.scaffold(name ?? `TF-${canon}-SCAFFOLD`);
+    return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  }
+);
+
+server.registerTool(
+  tn("isc.transforms.lint"),
+  {
+    title: "Lint Transform JSON",
+    description: "Validates a transform payload (missing required keys, wrong shapes). Also normalizes rule-backed operations.",
+    inputSchema: {
+      body: z.any()
+    }
+  },
+  async ({ body }) => {
+    const res = lintTransform(body);
+    const summary = summarizeLint(res);
+    return { content: [{ type: "text", text: asText({ ...res, ...summary }) }] };
+  }
+);
+
+
+  server.registerTool(
+    tn("isc.transforms.get"),
+    {
+      title: "Get Transform",
+      description: "GET /v3/transforms/:id",
+      inputSchema: z.object({
+        id: z.string().min(1)
+      })
+    },
+    async ({ id }) => {
+      try {
+        const res = await isc.request<any>("GET", `/transforms/${encodeURIComponent(id)}`);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // -----------------------
+  // Transforms (Phase 2) - Safe Upsert
+  // -----------------------
+  server.registerTool(
+  tn("isc.transforms.upsert"),
+  {
+    title: "Upsert Transform (Safe)",
+    description:
+      "Create or update a Transform with dryRun + JSON Patch diff + confirm-to-apply guardrails. Includes normalize + lint.",
+    inputSchema: z.object({
+      id: z.string().min(1).optional().describe("If provided → update, else create"),
+      body: z.any().describe("Transform payload. For update, prefer just {attributes:{...}}"),
+      dryRun: z.boolean().optional().default(true),
+      confirm: z.string().optional(),
+      reason: z.string().optional(),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ id, body, dryRun = true, confirm, reason, traceId }) => {
+    try {
+      const isUpdate = Boolean(id);
+      const mode = cfg.mode;
+
+      if (!body || typeof body !== "object") {
+        throw new Error("body must be a JSON object.");
+      }
+
+      // ---------------------------------------------------------
+      // Phase 4 (3.3): Lint + normalize early
+      // lintTransform() returns { normalized, messages } and performs deep normalization.
+      // ---------------------------------------------------------
+
+      // -------------------
+      // UPDATE
+      // -------------------
+      if (isUpdate) {
+        const transformId = id!;
+        const before = await isc.request<any>(
+          "GET",
+          `/transforms/${encodeURIComponent(transformId)}`
+        );
+
+        // If caller provided name/type, they MUST match existing (immutable)
+        if (body?.name && body.name !== before?.name) {
+          throw new Error(
+            `Update blocked: 'name' is immutable. Existing='${before?.name}', got='${body.name}'.`
+          );
+        }
+        if (body?.type && body.type !== before?.type) {
+          throw new Error(
+            `Update blocked: 'type' is immutable. Existing='${before?.type}', got='${body.type}'.`
+          );
+        }
+
+        // Merge attributes (only thing we actually update)
+        const nextAttributesRaw = body?.attributes ?? before?.attributes;
+
+        // Detect rule-backed Cloud Services Deployment Utility transforms
+        const isCSDURule =
+          before?.type === "rule" &&
+          before?.attributes?.name === "Cloud Services Deployment Utility" &&
+          typeof before?.attributes?.operation === "string";
+
+        // Do not allow changing the locked rule wiring if it's a CSDU rule-backed transform
+        if (isCSDURule && body?.attributes && typeof body.attributes === "object") {
+          if (
+            Object.prototype.hasOwnProperty.call(body.attributes, "name") &&
+            body.attributes.name !== before.attributes.name
+          ) {
+            throw new Error(
+              "Update blocked: attributes.name is locked for Cloud Services Deployment Utility rule transforms."
+            );
+          }
+          if (
+            Object.prototype.hasOwnProperty.call(body.attributes, "operation") &&
+            body.attributes.operation !== before.attributes.operation
+          ) {
+            throw new Error(
+              "Update blocked: attributes.operation is locked for Cloud Services Deployment Utility rule transforms."
+            );
+          }
+        }
+
+        // Choose a lint 'type':
+        // - For CSDU rule-backed transforms, lint by the operation key (e.g., generateRandomString)
+        // - Otherwise, lint by the transform's API type (e.g., static, lookup, dateMath, etc.)
+        const lintType = isCSDURule ? before.attributes.operation : before.type;
+
+        const lintInput = {
+          type: lintType,
+          name: before?.name ?? transformId,
+          attributes: nextAttributesRaw
+        };
+
+        const lint = lintTransform(lintInput);
+        const lintErrors = lint.messages.filter((m) => m.level === "error");
+        const lintWarnings = lint.messages.filter((m) => m.level === "warn");
+
+        if (lintErrors.length) {
+          throw new Error(
+            `Transform lint failed:\n- ${lintErrors
+              .map((m) => (m.path ? `${m.path}: ${m.message}` : m.message))
+              .join("\n- ")}`
+          );
+        }
+
+        // Use normalized attributes (deep-normalized nested transforms, coercions, etc.)
+        const nextAttributes = lint.normalized?.attributes ?? nextAttributesRaw;
+
+        // For diff purposes only (full object)
+        const after = {
+          ...before,
+          attributes: nextAttributes
+        };
+
+        const diff = jsonPatch(before, after);
+        const expectedConfirm = `APPLY_TRANSFORM_UPDATE:${before?.name ?? transformId}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(
+                  redactDeep({
+                    traceId,
+                    dryRun: true,
+                    plan: { method: "PUT", path: `/transforms/${transformId}`, mode },
+                    reason,
+                    expectedConfirm,
+                    rule: "Update only changes 'attributes'. name/type are immutable.",
+                    lint: { messages: lint.messages, warnings: lintWarnings },
+                    diff
+                  })
+                )
+              }
+            ]
+          };
+        }
+
+        if (mode !== "write") {
+          throw new Error(
+            "Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server."
+          );
+        }
+        if ((confirm ?? "").trim() !== expectedConfirm) {
+          throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+        }
+
+        // IMPORTANT: send only attributes for update (most compatible)
+        const payload = { attributes: nextAttributes };
+        const res = await isc.request<any>(
+          "PUT",
+          `/transforms/${encodeURIComponent(transformId)}`,
+          payload
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  traceId,
+                  applied: true,
+                  expectedConfirm,
+                  lint: { messages: lint.messages, warnings: lintWarnings },
+                  result: res
+                })
+              )
+            }
+          ]
+        };
+      }
+
+      // -------------------
+      // CREATE
+      // -------------------
+      if (!body?.name) {
+        throw new Error("Create requires body.name.");
+      }
+      if (!body?.type) {
+        throw new Error("Create requires body.type.");
+      }
+
+      const lint = lintTransform(body);
+      const lintErrors = lint.messages.filter((m) => m.level === "error");
+      const lintWarnings = lint.messages.filter((m) => m.level === "warn");
+
+      if (lintErrors.length) {
+        throw new Error(
+          `Transform lint failed:\n- ${lintErrors
+            .map((m) => (m.path ? `${m.path}: ${m.message}` : m.message))
+            .join("\n- ")}`
+        );
+      }
+
+      const createBody = {
+        // default internal=false unless explicitly set
+        internal: body.internal ?? false,
+        ...lint.normalized
+      };
+
+      const diff = jsonPatch(null, createBody);
+      const expectedConfirm = `APPLY_TRANSFORM_CREATE:${createBody?.name}`;
+
+      if (dryRun) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  traceId,
+                  dryRun: true,
+                  plan: { method: "POST", path: "/transforms", mode },
+                  reason,
+                  expectedConfirm,
+                  note: "Create defaults internal=false unless explicitly set.",
+                  lint: { messages: lint.messages, warnings: lintWarnings },
+                  diff,
+                  bodyPreview: createBody
+                })
+              )
+            }
+          ]
+        };
+      }
+
+      if (mode !== "write") {
+        throw new Error(
+          "Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server."
+        );
+      }
+      if ((confirm ?? "").trim() !== expectedConfirm) {
+        throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+      }
+
+      const res = await isc.request<any>("POST", "/transforms", createBody);
+      return {
+        content: [
+          {
+            type: "text",
+            text: asText(
+              redactDeep({
+                traceId,
+                applied: true,
+                expectedConfirm,
+                lint: { messages: lint.messages, warnings: lintWarnings },
+                result: res
+              })
+            )
+          }
+        ]
+      };
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+server.registerTool(
+  tn("isc.transforms.catalog.v2"),
+  {
+    title: "Transform Operations Catalog (Doc-aligned)",
+    description:
+      "Returns supported Transform operations with official doc URLs, required attributes, and safe scaffolds. Includes rule-backed ops (payload type=rule).",
+    inputSchema: z.object({
+      includeScaffold: z.boolean().optional().default(true),
+    }),
+  },
+  async ({ includeScaffold }) => {
+    const items = Object.values(TRANSFORM_CATALOG).map((spec) => {
+      const scaffold = includeScaffold ? spec.scaffold(`EXAMPLE-${spec.type}`) : undefined;
+
+      return {
+        key: spec.type,                       // operation key (or standard type)
+        title: spec.title,
+        docUrl: spec.docUrl,
+        payloadType: scaffold?.type ?? spec.type, // what actually gets sent to ISC
+        requiredUserAttributes: spec.requiredUserAttributes ?? [],
+        injectedAttributes: spec.injectedAttributes ?? {},
+        requiredAttributes: spec.requiredAttributes ?? [],
+        attributesOptional: Boolean(spec.attributesOptional),
+        scaffoldExample: scaffold,
+      };
+    });
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: asText({
+            generatedAt: new Date().toISOString(),
+            operationsIndex: "https://developer.sailpoint.com/docs/extensibility/transforms/operations/",
+            count: items.length,
+            types: listTransformTypes(),
+            items,
+          }),
+        },
+      ],
+    };
+  }
+);
+
+
+  
+
+server.registerTool(
+  tn("isc.transforms.findReferences"),
+  {
+    title: "Find Transform References (Identity Profiles)",
+    description:
+      "Scans Identity Profiles for references to a transform ID (or name) and returns JSON pointer paths where it appears.",
+    inputSchema: z.object({
+      transformId: z.string().min(1).optional(),
+      transformName: z.string().min(1).optional(),
+      identityProfileIds: z.array(z.string().min(1)).optional(),
+      maxProfiles: z.number().int().min(1).max(500).optional().default(200),
+      includeSnippets: z.boolean().optional().default(true),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ transformId, transformName, identityProfileIds, maxProfiles = 200, includeSnippets = true, traceId }) => {
+    try {
+      if (!transformId && !transformName) {
+        throw new Error("Provide transformId and/or transformName.");
+      }
+
+      const targets = [transformId, transformName].filter(Boolean).map(String);
+
+      // Resolve profile IDs
+      const ids: string[] = [];
+      if (identityProfileIds?.length) {
+        ids.push(...identityProfileIds);
+      } else {
+        let offset = 0;
+        const limit = 250;
+        while (ids.length < maxProfiles) {
+          const page = await isc.request<any>("GET", `/identity-profiles?limit=${limit}&offset=${offset}`);
+          const items = Array.isArray(page) ? page : (page?.items ?? page?.data ?? []);
+          if (!Array.isArray(items) || items.length === 0) break;
+          for (const it of items) {
+            if (it?.id) ids.push(String(it.id));
+            if (ids.length >= maxProfiles) break;
+          }
+          offset += limit;
+        }
+      }
+
+      const results: any[] = [];
+
+      for (const pid of ids) {
+        const profile = await isc.request<any>("GET", `/identity-profiles/${encodeURIComponent(pid)}`);
+        const hits = findJsonPointers(profile, (v, k) => {
+          if (typeof v !== "string") return false;
+          if (!targets.includes(v)) return false;
+          // Reduce noise: prefer keys that look transform-related, but allow ID match anywhere.
+          if (transformId && v === transformId) return true;
+          const kk = String(k || "").toLowerCase();
+          return kk.includes("transform") || kk.includes("mapping") || kk.endsWith("id");
+        });
+
+        if (hits.length) {
+          results.push({
+            identityProfile: { id: profile?.id ?? pid, name: profile?.name },
+            matchCount: hits.length,
+            matches: hits.map((h) => ({
+              path: h.path,
+              ...(includeSnippets ? { value: String(h.value).slice(0, 120) } : {})
+            }))
+          });
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: asText(
+              redactDeep({
+                traceId,
+                scanned: ids.length,
+                targets,
+                found: results.length,
+                results
+              })
+            )
+          }
+        ]
+      };
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+
+// -----------------------
+  // Identity Profiles
+  // -----------------------
+  server.registerTool(
+    tn("isc.identityProfiles.list"),
+    {
+      title: "List Identity Profiles",
+      description: "GET /v3/identity-profiles",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).optional(),
+        offset: z.number().int().min(0).optional()
+      })
+    },
+    async ({ limit, offset }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (limit !== undefined) qs.set("limit", String(limit));
+        if (offset !== undefined) qs.set("offset", String(offset));
+        const path = qs.toString() ? `/identity-profiles?${qs}` : "/identity-profiles";
+        const res = await isc.request<any>("GET", path);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.identityProfiles.get"),
+    {
+      title: "Get Identity Profile",
+      description: "GET /v3/identity-profiles/:id",
+      inputSchema: z.object({
+        id: z.string().min(1)
+      })
+    },
+    async ({ id }) => {
+      try {
+        const res = await isc.request<any>("GET", `/identity-profiles/${encodeURIComponent(id)}`);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+  
+
+server.registerTool(
+  tn("isc.identityProfiles.patch"),
+  {
+    title: "Patch Identity Profile (Safe)",
+    description:
+      "PATCH /v3/identity-profiles/:id using JSON Patch (dryRun + diff preview + confirm-to-apply).",
+    inputSchema: z.object({
+      id: z.string().min(1),
+      patch: z.array(
+        z.object({
+          op: z.enum(["add", "remove", "replace", "move", "copy", "test"]),
+          path: z.string().min(1),
+          value: z.any().optional(),
+          from: z.string().optional()
+        })
+      ).min(1),
+      dryRun: z.boolean().optional().default(true),
+      confirm: z.string().optional(),
+      reason: z.string().optional(),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ id, patch, dryRun = true, confirm, reason, traceId }) => {
+    try {
+      const mode = cfg.mode;
+      const before = await isc.request<any>("GET", `/identity-profiles/${encodeURIComponent(id)}`);
+
+      // Filter out patch ops that target read-only fields.
+      const filteredPatch = filterIdentityProfilePatchOps(patch as any[]);
+
+      const expectedConfirm = `APPLY_IDENTITY_PROFILE_PATCH:${before?.name ?? id}`;
+
+      if (dryRun) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  traceId,
+                  dryRun: true,
+                  plan: { method: "PATCH", path: `/identity-profiles/${id}`, mode },
+                  reason,
+                  expectedConfirm,
+                  note: "PATCH uses Content-Type: application/json-patch+json. See SailPoint Patch Requests guide.",
+                  patch: filteredPatch
+                })
+              )
+            }
+          ]
+        };
+      }
+
+      if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+      if ((confirm ?? "").trim() !== expectedConfirm) {
+        throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+      }
+
+      const res = await isc.request<any>(
+        "PATCH",
+        `/identity-profiles/${encodeURIComponent(id)}`,
+        filteredPatch,
+        { "Content-Type": "application/json-patch+json" } // Docs: https://developer.sailpoint.com/docs/api/patch-requests/
+      );
+
+      return {
+        content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }]
+      };
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+
+server.registerTool(
+  tn("isc.identityProfiles.mappings.replaceTransformId"),
+  {
+    title: "Replace Transform ID in Identity Profile mappings",
+    description:
+      "Scans an identity profile for occurrences of fromTransformId and builds a PATCH to replace them with toTransformId (dryRun + confirm-to-apply).",
+    inputSchema: z.object({
+      id: z.string().min(1),
+      fromTransformId: z.string().min(1),
+      toTransformId: z.string().min(1),
+      dryRun: z.boolean().optional().default(true),
+      confirm: z.string().optional(),
+      reason: z.string().optional(),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ id, fromTransformId, toTransformId, dryRun = true, confirm, reason, traceId }) => {
+    try {
+      const profile = await isc.request<any>("GET", `/identity-profiles/${encodeURIComponent(id)}`);
+      const hits = findJsonPointers(profile, (v, k) => {
+        if (typeof v !== "string") return false;
+        if (v !== fromTransformId) return false;
+        // Heuristic: only replace in keys that look transform-related to reduce accidental replacements.
+        const kk = String(k || "").toLowerCase();
+        return kk.includes("transform") || kk.endsWith("id");
+      });
+
+      if (hits.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  traceId,
+                  message: "No occurrences found.",
+                  identityProfile: { id: profile?.id ?? id, name: profile?.name }
+                })
+              )
+            }
+          ]
+        };
+      }
+
+      const patch: JsonPatchOp[] = hits.map((h) => ({ op: "replace", path: h.path, value: toTransformId }));
+
+      // Reuse the patch tool logic via dryRun/apply by calling the same endpoint.
+      const expectedConfirm = `APPLY_IDENTITY_PROFILE_PATCH:${profile?.name ?? id}`;
+
+      if (dryRun) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  traceId,
+                  dryRun: true,
+                  plan: { method: "PATCH", path: `/identity-profiles/${id}`, mode: cfg.mode },
+                  reason,
+                  expectedConfirm,
+                  found: hits.map((h) => ({ path: h.path })),
+                  patch
+                })
+              )
+            }
+          ]
+        };
+      }
+
+      if (cfg.mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+      if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+      const res = await isc.request<any>(
+        "PATCH",
+        `/identity-profiles/${encodeURIComponent(id)}`,
+        filterIdentityProfilePatchOps(patch),
+        { "Content-Type": "application/json-patch+json" }
+      );
+
+      return {
+        content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, replaced: hits.length, result: res })) }]
+      };
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+
+server.registerTool(
+  tn("isc.identityProfiles.upsert"),
+  {
+    title: "Upsert Identity Profile (Safe)",
+    description: "Create or update an Identity Profile with dryRun + diff + confirm-to-apply.",
+    inputSchema: z.object({
+      id: z.string().min(1).optional().describe("If provided → update, else create"),
+      body: z.any().describe("Identity Profile payload (JSON)"),
+      dryRun: z.boolean().optional().default(true),
+      confirm: z.string().optional(),
+      reason: z.string().optional(),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ id, body, dryRun = true, confirm, reason, traceId }) => {
+    try {
+      const isUpdate = Boolean(id);
+      const mode = cfg.mode;
+
+      if (!body || typeof body !== "object") throw new Error("body must be a JSON object.");
+
+      if (!isUpdate) {
+        // CREATE
+        if (!body?.name) throw new Error("Create requires body.name (Identity Profile name).");
+
+        const diff = jsonPatch(null, body);
+        const expectedConfirm = `APPLY_IDENTITY_PROFILE_CREATE:${body.name}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              { type: "text", text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "POST", path: "/identity-profiles", mode }, reason, expectedConfirm, diff, lint: { ok: lint.ok, summary: lint.summary, warnings: lint.warnings, errors: lint.errors }, bodyPreview: body })) }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>("POST", "/identity-profiles", body);
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } else {
+        // UPDATE
+        const profileId = id!;
+        const before = await isc.request<any>("GET", `/identity-profiles/${encodeURIComponent(profileId)}`);
+
+        // Produce after for diff (full replace style). If you want patch semantics later, we’ll add PATCH tool.
+        const after = { ...before, ...body };
+
+        const diff = jsonPatch(before, after);
+        const expectedConfirm = `APPLY_IDENTITY_PROFILE_UPDATE:${before?.name ?? profileId}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              { type: "text", text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "PATCH", path: `/identity-profiles/${profileId}`, mode }, reason, expectedConfirm, diff, lint: { ok: lint.ok, summary: lint.summary, warnings: lint.warnings, errors: lint.errors } })) }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const ops = filterIdentityProfilePatchOps(jsonPatch(before, after));
+        const res = await isc.request<any>("PATCH", `/identity-profiles/${encodeURIComponent(profileId)}`, ops, { "Content-Type": "application/json-patch+json" });
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      }
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+
+
+  // -----------------------
+  // Workflows
+  // -----------------------
+
+  /**
+   * Workflow authoring helpers.
+   *
+   * The Workflow Library endpoints return the authoritative catalog of available workflow
+   * triggers, actions, and operators for your tenant.
+   *
+   * Docs (workflow concepts + lists):
+   * - Workflows overview: https://documentation.sailpoint.com/saas/help/workflows/index.html
+   * - Workflow Triggers: https://documentation.sailpoint.com/saas/help/workflows/workflow-triggers.html
+   * - Workflow Actions: https://documentation.sailpoint.com/saas/help/workflows/workflow-actions.html
+   * - Workflow Operators: https://documentation.sailpoint.com/saas/help/workflows/workflow-operators.html
+   *
+   * API (workflow library catalog):
+   * - GET /v3/workflow-library (complete library): https://developer.sailpoint.com/docs/api/v3/list-complete-workflow-library
+   */
+  server.registerTool(
+    tn("isc.workflows.scaffold"),
+    {
+      title: "Scaffold Workflow + Library Catalog",
+      description:
+        "Fetches the Workflow Library (triggers/actions/operators) and generates a safe workflow create-request scaffold using a selected trigger.",
+      inputSchema: z.object({
+        name: z.string().min(1).describe("Workflow name"),
+        description: z.string().optional(),
+        // Choose a trigger by id or name; if omitted, tries to pick the Scheduled trigger.
+        triggerId: z.string().optional(),
+        triggerName: z.string().optional(),
+        includeLibrary: z.boolean().optional().default(true),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ name, description, triggerId, triggerName, includeLibrary = true, traceId }) => {
+      try {
+        // IMPORTANT:
+        // The "List complete workflow library" endpoint (GET /v3/workflow-library) returns
+        // a *single array* containing a mix of triggers/actions/operators (anyOf), not an object
+        // with {triggers, actions, operators}. See API spec.
+        // Ref: https://developer.sailpoint.com/docs/api/v3/list-complete-workflow-library
+        //
+        // To provide a deterministic, tenant-accurate catalog for authoring, we fetch each
+        // collection explicitly via:
+        //   GET /v3/workflow-library/triggers
+        //   GET /v3/workflow-library/actions
+        //   GET /v3/workflow-library/operators
+        // Ref:
+        // - https://developer.sailpoint.com/docs/api/v3/list-workflow-library-triggers/
+        // - https://developer.sailpoint.com/docs/api/v2024/list-workflow-library-actions
+        // - https://developer.sailpoint.com/docs/api/v3/list-workflow-library-operators/
+        const PAGE_LIMIT = 250;
+        const fetchAll = async (path: string): Promise<any[]> => {
+          const out: any[] = [];
+          for (let offset = 0; ; offset += PAGE_LIMIT) {
+            const qs = new URLSearchParams({ limit: String(PAGE_LIMIT), offset: String(offset) });
+            const page = await isc.request<any>("GET", `${path}?${qs}`);
+            const arr = Array.isArray(page) ? page : [];
+            out.push(...arr);
+            if (arr.length < PAGE_LIMIT) break;
+          }
+          return out;
+        };
+
+        // Always fetch triggers (needed to pick a trigger). Fetch the rest only if includeLibrary.
+        const triggers: any[] = await fetchAll("/workflow-library/triggers");
+        const actions: any[] = includeLibrary ? await fetchAll("/workflow-library/actions") : [];
+        const operators: any[] = includeLibrary ? await fetchAll("/workflow-library/operators") : [];
+
+        // Choose trigger
+        let trigger = null as any;
+        if (triggerId) trigger = triggers.find(t => String(t?.id) === String(triggerId));
+        if (!trigger && triggerName) {
+          const tnLower = triggerName.toLowerCase();
+          trigger = triggers.find(t => String(t?.name ?? "").toLowerCase() === tnLower);
+        }
+        if (!trigger) {
+          // Best-effort default: "Scheduled" trigger if present (common for time-based workflows)
+          trigger =
+            triggers.find(t => String(t?.name ?? "").toLowerCase().includes("scheduled")) ??
+            triggers[0] ??
+            null;
+        }
+
+        // Safe CreateWorkflowRequest scaffold:
+        // - enabled must be false on creation (per CreateWorkflowRequest model)
+        // - definition is omitted by default so authors don't accidentally send invalid step JSON.
+        const createRequest: any = {
+          name,
+          description: description ?? "",
+          enabled: false,
+          trigger: trigger
+            ? {
+                id: trigger.id,
+                type: trigger.type,
+                // Keep attributes empty by default; authors fill based on trigger schema in library.
+                attributes: {}
+              }
+            : undefined
+        };
+
+        // Authoring helper: a minimal definition template that the AI host can fill using library items.
+        // See WorkflowDefinition model (start + steps map):
+        // https://developer.sailpoint.com/docs/tools/sdk/python/v3/models/workflow-definition
+        const definitionTemplate = {
+          start: "trigger",
+          steps: {
+            trigger: {
+              // Placeholder: pick a trigger step from library and then link to an action/operator step.
+              // The library payload includes step schemas to guide valid JSON authoring.
+              type: "TRIGGER_STEP",
+              nextStep: "end"
+            },
+            end: { type: "END" }
+          }
+        };
+
+        const payload = redactDeep({
+          traceId,
+          createRequest,
+          definitionTemplate,
+          selectedTrigger: trigger ? { id: trigger.id, name: trigger.name, type: trigger.type } : null,
+          counts: { triggers: triggers.length, actions: actions.length, operators: operators.length },
+          // Include the full tenant library only when requested (can be large)
+          library: includeLibrary ? { triggers, actions, operators } : undefined
+        });
+
+        return { content: [{ type: "text", text: asText(payload) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // Workflow JSON linting (server-side) based on UI builder rules:
+  // - Exactly one trigger per workflow
+  // - Valid next-step references
+  // - Reachability (unconnected steps)
+  // - END step reachable from start
+  // Docs: https://documentation.sailpoint.com/saas/help/workflows/workflow-build.html
+  server.registerTool(
+    tn("isc.workflows.lint"),
+    {
+      title: "Lint Workflow JSON",
+      description: "Validates a workflow definition for common builder constraints (missing steps, unreachable nodes, invalid nextStep refs, no END reachable).",
+      inputSchema: z.object({
+        definition: z.any().describe("Workflow definition object (definition.start + definition.steps)"),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ definition, traceId }) => {
+      try {
+        const lint = lintWorkflowDefinition(definition);
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, ok: lint.ok, summary: lint.summary, messages: lint.messages })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+
+  // Library helpers (authoritative tenant catalog)
+  // API docs:
+  // - Triggers:  GET /v3/workflow-library/triggers  https://developer.sailpoint.com/docs/api/v3/list-workflow-library-triggers/
+  // - Actions:   GET /v3/workflow-library/actions   https://developer.sailpoint.com/docs/api/v2024/list-workflow-library-actions
+  // - Operators: GET /v3/workflow-library/operators https://developer.sailpoint.com/docs/api/v3/list-workflow-library-operators/
+  // Concepts:
+  // - Triggers:  https://documentation.sailpoint.com/saas/help/workflows/workflow-triggers.html
+  // - Actions:   https://documentation.sailpoint.com/saas/help/workflows/workflow-actions.html
+  // - Operators: https://documentation.sailpoint.com/saas/help/workflows/workflow-operators.html
+
+  const fetchAllWorkflowLibrary = async (path: string): Promise<any[]> => {
+    const PAGE_LIMIT = 250;
+    const out: any[] = [];
+    for (let offset = 0; ; offset += PAGE_LIMIT) {
+      const qs = new URLSearchParams({ limit: String(PAGE_LIMIT), offset: String(offset) });
+      const page = await isc.request<any>("GET", `${path}?${qs}`);
+      const arr = Array.isArray(page) ? page : [];
+      out.push(...arr);
+      if (arr.length < PAGE_LIMIT) break;
+    }
+    return out;
+  };
+
+  server.registerTool(
+    tn("isc.workflows.library.triggers"),
+    {
+      title: "List Workflow Library Triggers",
+      description: "Lists available workflow triggers for this tenant (authoritative). GET /v3/workflow-library/triggers",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const triggers = await fetchAllWorkflowLibrary("/workflow-library/triggers");
+        return { content: [{ type: "text", text: asText(redactDeep({ count: triggers.length, items: triggers })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.library.actions"),
+    {
+      title: "List Workflow Library Actions",
+      description: "Lists available workflow actions for this tenant (authoritative). GET /v3/workflow-library/actions",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const actions = await fetchAllWorkflowLibrary("/workflow-library/actions");
+        return { content: [{ type: "text", text: asText(redactDeep({ count: actions.length, items: actions })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.library.operators"),
+    {
+      title: "List Workflow Library Operators",
+      description: "Lists available workflow operators for this tenant (authoritative). GET /v3/workflow-library/operators",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const operators = await fetchAllWorkflowLibrary("/workflow-library/operators");
+        return { content: [{ type: "text", text: asText(redactDeep({ count: operators.length, items: operators })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.library.all"),
+    {
+      title: "Get Complete Workflow Library",
+      description: "Returns triggers, actions, and operators (authoritative) by calling the dedicated library endpoints.",
+      inputSchema: z.object({})
+    },
+    async () => {
+      try {
+        const [triggers, actions, operators] = await Promise.all([
+          fetchAllWorkflowLibrary("/workflow-library/triggers"),
+          fetchAllWorkflowLibrary("/workflow-library/actions"),
+          fetchAllWorkflowLibrary("/workflow-library/operators")
+        ]);
+        return {
+          content: [
+            {
+              type: "text",
+              text: asText(
+                redactDeep({
+                  counts: { triggers: triggers.length, actions: actions.length, operators: operators.length },
+                  triggers,
+                  actions,
+                  operators
+                })
+              )
+            }
+          ]
+        };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.list"),
+    {
+      title: "List Workflows",
+      description: "GET /v3/workflows",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(250).optional(),
+        offset: z.number().int().min(0).optional()
+      })
+    },
+    async ({ limit, offset }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (limit !== undefined) qs.set("limit", String(limit));
+        if (offset !== undefined) qs.set("offset", String(offset));
+        const path = qs.toString() ? `/workflows?${qs}` : "/workflows";
+        const res = await isc.request<any>("GET", path);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.get"),
+    {
+      title: "Get Workflow",
+      description: "GET /v3/workflows/:id",
+      inputSchema: z.object({
+        id: z.string().min(1)
+      })
+    },
+    async ({ id }) => {
+      try {
+        const res = await isc.request<any>("GET", `/workflows/${encodeURIComponent(id)}`);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.patch"),
+    {
+      title: "Patch Workflow (Safe)",
+      description:
+        "PATCH /v3/workflows/:id using JSON Patch (application/json-patch+json). Includes validation, dryRun + diff + confirm-to-apply.",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        patch: z.array(z.any()).describe("JSON Patch ops array"),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ id, patch, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const before = await isc.request<any>("GET", `/workflows/${encodeURIComponent(id)}`);
+        const safePatch = filterWorkflowPatchOps(patch);
+        const expectedConfirm = `APPLY_WORKFLOW_PATCH:${before?.name ?? id}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(
+                  redactDeep({
+                    traceId,
+                    dryRun: true,
+                    plan: { method: "PATCH", path: `/workflows/${id}`, mode },
+                    reason,
+                    expectedConfirm,
+                    removedOps: (Array.isArray(patch) ? patch.length : 0) - safePatch.length,
+                    patch: safePatch
+                  })
+                )
+              }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>(
+          "PATCH",
+          `/workflows/${encodeURIComponent(id)}`,
+          safePatch,
+          { "Content-Type": "application/json-patch+json" }
+        );
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.setEnabled"),
+    {
+      title: "Enable/Disable Workflow (Safe)",
+      description: "Convenience wrapper to enable or disable a workflow via PATCH /v3/workflows/:id (JSON Patch).",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        enabled: z.boolean(),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ id, enabled, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const before = await isc.request<any>("GET", `/workflows/${encodeURIComponent(id)}`);
+        const expectedConfirm = `APPLY_WORKFLOW_SET_ENABLED:${before?.name ?? id}:${enabled ? "true" : "false"}`;
+        const patch = filterWorkflowPatchOps([{ op: "replace", path: "/enabled", value: Boolean(enabled) }]);
+
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "PATCH", path: `/workflows/${id}`, mode }, reason, expectedConfirm, patch }))
+              }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>(
+          "PATCH",
+          `/workflows/${encodeURIComponent(id)}`,
+          patch,
+          { "Content-Type": "application/json-patch+json" }
+        );
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.delete"),
+    {
+      title: "Delete Workflow (Safe)",
+      description: "DELETE /v3/workflows/:id with dryRun + confirm-to-apply. Refuses to delete enabled workflows unless force=true.",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        force: z.boolean().optional().default(false),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ id, force = false, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const before = await isc.request<any>("GET", `/workflows/${encodeURIComponent(id)}`);
+        const expectedConfirm = `APPLY_WORKFLOW_DELETE:${before?.name ?? id}`;
+
+        if (before?.enabled && !force) {
+          throw new Error("Refusing to delete an enabled workflow. Disable it first (isc.workflows.setEnabled enabled=false) or pass force=true.");
+        }
+
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "DELETE", path: `/workflows/${id}`, mode }, reason, expectedConfirm }))
+              }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>("DELETE", `/workflows/${encodeURIComponent(id)}`);
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+  server.registerTool(
+  tn("isc.workflows.upsert"),
+  {
+    title: "Upsert Workflow (Safe)",
+    description: "Create or update a Workflow with dryRun + diff + confirm-to-apply.",
+    inputSchema: z.object({
+      id: z.string().min(1).optional().describe("If provided → update, else create"),
+      body: z.any().describe("Workflow JSON definition"),
+      dryRun: z.boolean().optional().default(true),
+      confirm: z.string().optional(),
+      reason: z.string().optional(),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ id, body, dryRun = true, confirm, reason, traceId }) => {
+    try {
+      const isUpdate = Boolean(id);
+      const mode = cfg.mode;
+
+      if (!body || typeof body !== "object") throw new Error("body must be a JSON object.");
+
+      if (!isUpdate) {
+        if (!body?.name) throw new Error("Create requires body.name (Workflow name).");
+
+        // Validate workflow structure when a definition is provided.
+        // Workflows must have exactly one trigger. Docs: https://documentation.sailpoint.com/saas/help/workflows/index.html
+        const lint = lintWorkflowDefinition(body?.definition);
+        const validation = { ok: lint.ok, errors: lint.errors, warnings: lint.warnings };
+        if (!validation.ok) {
+          throw new Error(`Workflow definition validation failed:\n- ${validation.errors.join("\n- ")}`);
+        }
+
+        const diff = jsonPatch(null, body);
+        const expectedConfirm = `APPLY_WORKFLOW_CREATE:${body.name}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              { type: "text", text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "POST", path: "/workflows", mode }, reason, expectedConfirm, diff, lint: { ok: lint.ok, summary: lint.summary, warnings: lint.warnings, errors: lint.errors }, bodyPreview: body })) }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>("POST", "/workflows", body);
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } else {
+        const workflowId = id!;
+        const before = await isc.request<any>("GET", `/workflows/${encodeURIComponent(workflowId)}`);
+
+        const after = { ...before, ...body };
+
+        // Validate workflow structure on update as well (if definition exists after merge)
+        const lint = lintWorkflowDefinition(after?.definition);
+        const validation = { ok: lint.ok, errors: lint.errors, warnings: lint.warnings };
+        if (!validation.ok) {
+          throw new Error(`Workflow definition validation failed:\n- ${validation.errors.join("\n- ")}`);
+        }
+        const diff = jsonPatch(before, after);
+        const expectedConfirm = `APPLY_WORKFLOW_UPDATE:${before?.name ?? workflowId}`;
+
+        if (dryRun) {
+          return {
+            content: [
+              { type: "text", text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "PUT", path: `/workflows/${workflowId}`, mode }, reason, expectedConfirm, diff, lint: { ok: lint.ok, summary: lint.summary, warnings: lint.warnings, errors: lint.errors } })) }
+            ]
+          };
+        }
+
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>("PUT", `/workflows/${encodeURIComponent(workflowId)}`, after);
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      }
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+server.registerTool(
+  tn("isc.workflows.executeExternal"),
+  {
+    title: "Execute Workflow (External)",
+    description: "POST /v3/workflows/execute/external/:id - triggers a workflow externally.",
+    inputSchema: z.object({
+      workflowId: z.string().min(1),
+      body: z.any().describe("Execution input payload (trigger data)"),
+      traceId: z.string().optional()
+    })
+  },
+  async ({ workflowId, body, traceId }) => {
+    try {
+      const res = await isc.request<any>(
+        "POST",
+        `/workflows/execute/external/${encodeURIComponent(workflowId)}`,
+        body ?? {}
+      );
+      return { content: [{ type: "text", text: asText(redactDeep({ traceId, result: res })) }] };
+    } catch (e) {
+      const err = redactDeep(toSafeError(e));
+      return { content: [{ type: "text", text: asText({ error: err }) }] };
+    }
+  }
+);
+
+  server.registerTool(
+    tn("isc.workflows.executeExternalTest"),
+    {
+      title: "Test External Execute Workflow (Safe)",
+      description: "POST /v3/workflows/execute/external/:id/test - validates external execution for a workflow.",
+      inputSchema: z.object({
+        workflowId: z.string().min(1),
+        body: z.any().optional().describe("Test execution input payload"),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ workflowId, body, traceId }) => {
+      try {
+        const res = await isc.request<any>(
+          "POST",
+          `/workflows/execute/external/${encodeURIComponent(workflowId)}/test`,
+          body ?? {}
+        );
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // External trigger OAuth clients
+  // API docs: https://developer.sailpoint.com/docs/api/v3/create-workflow-external-trigger/
+  server.registerTool(
+    tn("isc.workflows.externalOauthClients.create"),
+    {
+      title: "Create External Trigger OAuth Client (Safe)",
+      description: "POST /v3/workflows/:id/external/oauth-clients with dryRun + confirm-to-apply.",
+      inputSchema: z.object({
+        workflowId: z.string().min(1),
+        body: z.any().describe("CreateWorkflowExternalTrigger request body"),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ workflowId, body, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const expectedConfirm = `APPLY_WORKFLOW_EXTERNAL_OAUTH_CLIENT_CREATE:${workflowId}`;
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "POST", path: `/workflows/${workflowId}/external/oauth-clients`, mode }, reason, expectedConfirm, bodyPreview: body }))
+              }
+            ]
+          };
+        }
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+
+        const res = await isc.request<any>(
+          "POST",
+          `/workflows/${encodeURIComponent(workflowId)}/external/oauth-clients`,
+          body ?? {}
+        );
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // Workflow test (workflow must be disabled before testing)
+  // API docs: https://developer.sailpoint.com/docs/api/v3/test-workflow/
+  server.registerTool(
+    tn("isc.workflows.testById"),
+    {
+      title: "Test Workflow (Safe)",
+      description: "POST /v3/workflows/:id/test with dryRun + confirm-to-apply. Refuses if workflow is enabled.",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        body: z.any().optional().describe("TestWorkflow request body"),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ id, body, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const wf = await isc.request<any>("GET", `/workflows/${encodeURIComponent(id)}`);
+        if (wf?.enabled) {
+          throw new Error("Workflow must be disabled to run test. Disable it first (isc.workflows.setEnabled enabled=false).");
+        }
+        const expectedConfirm = `APPLY_WORKFLOW_TEST:${wf?.name ?? id}`;
+        if (dryRun) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "POST", path: `/workflows/${id}/test`, mode }, reason, expectedConfirm, bodyPreview: body ?? {} }))
+              }
+            ]
+          };
+        }
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+        const res = await isc.request<any>("POST", `/workflows/${encodeURIComponent(id)}/test`, body ?? {});
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+
+  server.registerTool(
+    tn("isc.workflows.executions.list"),
+    {
+      title: "List Workflow Executions",
+      description: "GET /v3/workflows/:id/executions",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        limit: z.number().int().min(1).max(250).optional(),
+        offset: z.number().int().min(0).optional()
+      })
+    },
+    async ({ id, limit, offset }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (limit !== undefined) qs.set("limit", String(limit));
+        if (offset !== undefined) qs.set("offset", String(offset));
+        const path = qs.toString()
+          ? `/workflows/${encodeURIComponent(id)}/executions?${qs}`
+          : `/workflows/${encodeURIComponent(id)}/executions`;
+
+        const res = await isc.request<any>("GET", path);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // Execution detail + cancel helpers
+  // API docs:
+  // - Get execution:    GET /v3/workflow-executions/:id   https://developer.sailpoint.com/docs/api/v3/get-workflow-execution
+  // - Cancel execution: POST /v3/workflow-executions/:id/cancel https://developer.sailpoint.com/docs/api/v3/cancel-workflow-execution
+
+  server.registerTool(
+    tn("isc.workflows.executions.get"),
+    {
+      title: "Get Workflow Execution",
+      description: "GET /v3/workflow-executions/:id",
+      inputSchema: z.object({ id: z.string().min(1) })
+    },
+    async ({ id }) => {
+      try {
+        const res = await isc.request<any>("GET", `/workflow-executions/${encodeURIComponent(id)}`);
+        return { content: [{ type: "text", text: asText(redactDeep(res)) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  server.registerTool(
+    tn("isc.workflows.executions.cancel"),
+    {
+      title: "Cancel Workflow Execution (Safe)",
+      description: "POST /v3/workflow-executions/:id/cancel with dryRun + confirm-to-apply",
+      inputSchema: z.object({
+        id: z.string().min(1),
+        dryRun: z.boolean().optional().default(true),
+        confirm: z.string().optional(),
+        reason: z.string().optional(),
+        traceId: z.string().optional()
+      })
+    },
+    async ({ id, dryRun = true, confirm, reason, traceId }) => {
+      try {
+        const mode = cfg.mode;
+        const expectedConfirm = `APPLY_WORKFLOW_EXECUTION_CANCEL:${id}`;
+        if (dryRun) {
+          return {
+            content: [
+              { type: "text", text: asText(redactDeep({ traceId, dryRun: true, plan: { method: "POST", path: `/workflow-executions/${id}/cancel`, mode }, reason, expectedConfirm })) }
+            ]
+          };
+        }
+        if (mode !== "write") throw new Error("Server is readonly. Set ISC_MCP_MODE=write and restart the MCP server.");
+        if ((confirm ?? "").trim() !== expectedConfirm) throw new Error(`Confirm mismatch. Expected confirm="${expectedConfirm}"`);
+        const res = await isc.request<any>("POST", `/workflow-executions/${encodeURIComponent(id)}/cancel`, {});
+        return { content: [{ type: "text", text: asText(redactDeep({ traceId, applied: true, expectedConfirm, lint: { warnings: lint.warnings ?? [] }, result: res })) }] };
+      } catch (e) {
+        const err = redactDeep(toSafeError(e));
+        return { content: [{ type: "text", text: asText({ error: err }) }] };
+      }
+    }
+  );
+
+  // -----------------------
+  // Start stdio transport
+  // -----------------------
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  log.info("isc-lead-dev MCP server running (stdio). Base API:", isc.getBaseApi());
+}
+
+main().catch((e) => {
+  console.error("[isc-mcp] fatal:", e);
+  process.exit(1);
+});

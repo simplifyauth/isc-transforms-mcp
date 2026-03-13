@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.getReferenceIdentityAttribute.schema.json",
+  "title": "SailPoint ISC Transform Schema - Get Reference Identity Attribute (rule-backed)",
+  "description": "Strict schema for the SailPoint ISC 'Get Reference Identity Attribute' operation. Per SailPoint docs, this is implemented as a rule transform: type must be 'rule' and attributes must target the 'Cloud Services Deployment Utility' rule with operation 'getReferenceIdentityAttribute'. uid and attributeName are required. uid supports specifying the identity UID directly or the keyword 'manager'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "rule"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "operation",
+        "uid",
+        "attributeName"
+      ],
+      "properties": {
+        "name": {
+          "const": "Cloud Services Deployment Utility",
+          "description": "Referenced rule name must be 'Cloud Services Deployment Utility'."
+        },
+        "operation": {
+          "const": "getReferenceIdentityAttribute",
+          "description": "Operation must be 'getReferenceIdentityAttribute'."
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "description": "UID of the reference identity. Docs allow 'manager' to reference the identity's manager."
+        },
+        "attributeName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the identity attribute to retrieve from the referenced identity."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "rule",
+      "name": "Get Manager Email Transform",
+      "attributes": {
+        "name": "Cloud Services Deployment Utility",
+        "operation": "getReferenceIdentityAttribute",
+        "uid": "manager",
+        "attributeName": "email"
+      }
+    },
+    {
+      "type": "rule",
+      "name": "Get Another Identity Attribute Transform",
+      "attributes": {
+        "name": "Cloud Services Deployment Utility",
+        "operation": "getReferenceIdentityAttribute",
+        "uid": "jsmith",
+        "attributeName": "displayName"
+      }
+    }
+  ]
+}

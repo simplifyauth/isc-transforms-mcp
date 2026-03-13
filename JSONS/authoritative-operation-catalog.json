@@ -1,0 +1,280 @@
+{
+  "operations": [
+    {
+      "type": "accountAttribute",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/account-attribute/",
+      "summary": "Look up an account for a particular source on an identity.",
+      "status": "supported",
+      "label": "Account Attribute"
+    },
+    {
+      "type": "base64Decode",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/base64-decode/",
+      "summary": "Render base64 data in its original binary format.",
+      "status": "supported",
+      "label": "Base64 Decode"
+    },
+    {
+      "type": "base64Encode",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/base64-encode/",
+      "summary": "Encode data with a Base64-based text encoding scheme.",
+      "status": "supported",
+      "label": "Base64 Encode"
+    },
+    {
+      "type": "concat",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/concatenation/",
+      "summary": "Join two or more string values into a combined output.",
+      "status": "supported",
+      "label": "Concatenation"
+    },
+    {
+      "type": "conditional",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/conditional/",
+      "summary": "Output different values depending on simple conditional logic.",
+      "status": "supported",
+      "label": "Conditional"
+    },
+    {
+      "type": "dateCompare",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/date-compare/",
+      "summary": "Compare two dates and return a calculated value.",
+      "status": "supported",
+      "label": "Date Compare"
+    },
+    {
+      "type": "dateFormat",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/date-format/",
+      "summary": "Convert datetime strings from one format to another.",
+      "status": "supported",
+      "label": "Date Format"
+    },
+    {
+      "type": "dateMath",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/date-math/",
+      "summary": "Add, subtract, and round components of a timestamp's incoming value.",
+      "status": "supported",
+      "label": "Date Math"
+    },
+    {
+      "type": "decomposeDiacriticalMarks",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/decompose-diacritical-marks/",
+      "summary": "Clean or standardize symbols used within language.",
+      "status": "supported",
+      "label": "Decompose Diacritical Marks"
+    },
+    {
+      "type": "displayName",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/display-name/",
+      "summary": "Use Preferred Name over Given Name to create an identity’s Display Name.",
+      "status": "supported",
+      "label": "Display Name"
+    },
+    {
+      "type": "e164phone",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/e164-phone/",
+      "summary": "Convert a phone number string into an E.164-compatible number.",
+      "status": "supported",
+      "label": "E.164 Phone"
+    },
+    {
+      "type": "firstValid",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/first-valid/",
+      "summary": "Return the first piece of data that is not null.",
+      "status": "supported",
+      "label": "First Valid"
+    },
+    {
+      "type": "rule",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/generate-random-string/",
+      "summary": "Generate a random string of any length.",
+      "status": "supported",
+      "label": "Generate Random String",
+      "operation": "generateRandomString"
+    },
+    {
+      "type": "rule",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/get-end-of-string/",
+      "summary": "Get the rightmost N characters of a string.",
+      "status": "supported",
+      "label": "Get End of String",
+      "operation": "getEndOfString"
+    },
+    {
+      "type": "rule",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/get-reference-identity-attribute/",
+      "summary": "Get another user's identity attribute.",
+      "status": "supported",
+      "label": "Get Reference Identity Attribute",
+      "operation": "getReferenceIdentityAttribute"
+    },
+    {
+      "type": "identityAttribute",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/identity-attribute/",
+      "summary": "Get a user's identity attribute's value.",
+      "status": "supported",
+      "label": "Identity Attribute"
+    },
+    {
+      "type": "indexOf",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/index-of/",
+      "summary": "Get the location of a specific substring within a value.",
+      "status": "supported",
+      "label": "Index Of"
+    },
+    {
+      "type": "iso3166",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/iso-3166/",
+      "summary": "Convert a string into an ISO 3166 country code value.",
+      "status": "supported",
+      "label": "ISO3166"
+    },
+    {
+      "type": "join",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/join/",
+      "summary": "Join two or more string values into a combined output with a defined separator.",
+      "status": "supported",
+      "label": "Join"
+    },
+    {
+      "type": "lastIndexOf",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/last-index-of/",
+      "summary": "Returns last location of specific substring.",
+      "status": "supported",
+      "label": "Last Index Of"
+    },
+    {
+      "type": "leftPad",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/left-pad/",
+      "summary": "Left pad of the input string.",
+      "status": "supported",
+      "label": "Left Pad"
+    },
+    {
+      "type": "lookup",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/lookup/",
+      "summary": "Look up and return a key's matching value.",
+      "status": "supported",
+      "label": "Lookup"
+    },
+    {
+      "type": "lower",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/lower/",
+      "summary": "Convert an input string into all lowercase letters.",
+      "status": "supported",
+      "label": "Lower"
+    },
+    {
+      "type": "normalizeNames",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/name-normalizer/",
+      "summary": "Clean or standardize the spelling of strings coming in from source systems.",
+      "status": "supported",
+      "label": "Name Normalizer"
+    },
+    {
+      "type": "randomAlphaNumeric",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/random-alphanumeric/",
+      "summary": "Generate a random string of any length.",
+      "status": "supported",
+      "label": "Random Alphanumeric"
+    },
+    {
+      "type": "randomNumeric",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/random-numeric/",
+      "summary": "Generate a random number of any length.",
+      "status": "supported",
+      "label": "Random Numeric"
+    },
+    {
+      "type": "reference",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/reference/",
+      "summary": "Reuse a transform that has already been written.",
+      "status": "supported",
+      "label": "Reference"
+    },
+    {
+      "type": "replaceAll",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/replace-all/",
+      "summary": "Find and replace all instances of all patterns.",
+      "status": "supported",
+      "label": "Replace All"
+    },
+    {
+      "type": "replace",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/replace/",
+      "summary": "Find and replace all instances of a single string.",
+      "status": "supported",
+      "label": "Replace"
+    },
+    {
+      "type": "rfc5646",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/rfc-5646/",
+      "summary": "Convert three-letter abbreviation to RFC5646 language tag.",
+      "status": "supported",
+      "label": "RFC5646"
+    },
+    {
+      "type": "rightPad",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/right-pad/",
+      "summary": "Add padding to the right of an incoming string.",
+      "status": "supported",
+      "label": "Right Pad"
+    },
+    {
+      "type": "rule",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/rule/",
+      "summary": "Reuse rule logic that has already been written for a previous use case.",
+      "status": "supported",
+      "label": "Rule"
+    },
+    {
+      "type": "split",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/split/",
+      "summary": "Return the Nth element of a split array.",
+      "status": "supported",
+      "label": "Split"
+    },
+    {
+      "type": "static",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/static/",
+      "summary": "Return a fixed string value.",
+      "status": "supported",
+      "label": "Static"
+    },
+    {
+      "type": "substring",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/substring/",
+      "summary": "Get the inner portion of a string passed into the transform.",
+      "status": "supported",
+      "label": "Substring"
+    },
+    {
+      "type": "trim",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/trim/",
+      "summary": "Trim whitespaces from both the beginning and ending of input strings.",
+      "status": "supported",
+      "label": "Trim"
+    },
+    {
+      "type": "upper",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/upper/",
+      "summary": "Convert an input string into all uppercase letters.",
+      "status": "supported",
+      "label": "Upper"
+    },
+    {
+      "type": "usernameGenerator",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/username-generator/",
+      "summary": "Derive a unique value for an attribute in an account create profile.",
+      "status": "supported",
+      "label": "Username Generator"
+    },
+    {
+      "type": "uuid",
+      "docUrl": "https://developer.sailpoint.com/docs/extensibility/transforms/operations/uuid-generator/",
+      "summary": "Create a universal unique ID (UUID).",
+      "status": "supported",
+      "label": "UUID Generator"
+    }
+  ]
+}

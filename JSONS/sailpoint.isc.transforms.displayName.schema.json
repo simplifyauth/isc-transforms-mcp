@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.displayName.schema.json",
+  "title": "SailPoint ISC Transform Schema - displayName",
+  "description": "Strict schema derived from SailPoint official Display Name operation documentation. This transform constructs Display Name as (Preferred Name if present else Given Name) + ' ' + Family Name. Docs require the 'attributes' key to be present and not null.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "displayName"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Per docs, the attributes object must be present and not null. No configurable required fields are documented.",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "type": "string",
+          "description": "Shown in docs examples as a placeholder value. Not documented as required."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "name": "Display Name Transform",
+      "type": "displayName",
+      "attributes": {
+        "input": "input"
+      }
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.accountAttribute.schema.json",
+  "title": "SailPoint ISC Transform Schema - accountAttribute",
+  "description": "Strict schema derived from the SailPoint official Account Attribute operation documentation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "accountAttribute"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attributeName"
+      ],
+      "properties": {
+        "sourceName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Source display name to search (e.g., 'Active Directory'). If the display name changes, this reference must be updated."
+        },
+        "applicationId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Alternative to sourceName: source external GUID."
+        },
+        "applicationName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Alternative to sourceName: source immutable name."
+        },
+        "attributeName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Account attribute to return (must match the account attribute name visible in the UI or source schema)."
+        },
+        "accountSortAttribute": {
+          "type": "string",
+          "minLength": 1,
+          "default": "created",
+          "description": "Attribute name to sort returned accounts by when multiple accounts exist. Default 'created' (ascending; oldest wins)."
+        },
+        "accountSortDescending": {
+          "type": "boolean",
+          "default": false,
+          "description": "Sort order when multiple accounts exist. Default false (ascending)."
+        },
+        "accountReturnFirstLink": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, return the value from the first account in the sorted list even if null; if false, return the first non-null value. Default false."
+        },
+        "accountFilter": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Database filter (sailpoint.object.Filter) ANDed with the default source+identity filter. Only searchable fields are supported (nativeIdentity, displayName, entitlements)."
+        },
+        "accountPropertyFilter": {
+          "type": "string",
+          "minLength": 1,
+          "description": "In-memory filter (sailpoint.object.Filter) applied after retrieval. All account attributes can be referenced."
+        },
+        "input": {
+          "type": "object",
+          "description": "Explicit input object. If omitted, the transform uses implicit input configured via UI/source+attribute mapping.",
+          "additionalProperties": true
+        }
+      },
+      "allOf": [
+        {
+          "description": "Exactly one source reference must be provided: sourceName OR applicationId OR applicationName.",
+          "oneOf": [
+            {
+              "required": [
+                "sourceName"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "applicationId"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "applicationName"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "applicationId"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "sourceName"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "applicationName"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "applicationName"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "sourceName"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "applicationId"
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "type": "accountAttribute",
+      "name": "Account Attribute Transform",
+      "attributes": {
+        "sourceName": "Corporate HR",
+        "attributeName": "HIREDATE",
+        "accountSortAttribute": "created",
+        "accountSortDescending": true,
+        "accountReturnFirstLink": true,
+        "accountPropertyFilter": "(WORKER_STATUS__c == \"active\")"
+      }
+    }
+  ]
+}

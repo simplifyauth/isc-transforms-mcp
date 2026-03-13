@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.identityAttribute.schema.json",
+  "title": "SailPoint ISC Transform Schema - identityAttribute",
+  "description": "Strict schema derived from SailPoint official Identity Attribute operation documentation. Retrieves the value of a user's identity attribute by its system (camel-cased) name.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "identityAttribute"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "System (camel-cased) name of the identity attribute to retrieve (e.g., 'email', 'uid')."
+        },
+        "input": {
+          "description": "Optional explicit input data. If omitted, the transform uses input from the source+attribute combination configured in the UI. Modeled as a nested transform object.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as explicit input (name optional in docs).",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "attributes": {
+        "name": "email"
+      },
+      "type": "identityAttribute",
+      "name": "Identity Attribute Transform"
+    },
+    {
+      "attributes": {
+        "name": "uid"
+      },
+      "type": "identityAttribute",
+      "name": "Identity Attribute Transform"
+    },
+    {
+      "attributes": {
+        "name": "identificationNumber"
+      },
+      "type": "identityAttribute",
+      "name": "Identity Attribute Transform"
+    }
+  ]
+}

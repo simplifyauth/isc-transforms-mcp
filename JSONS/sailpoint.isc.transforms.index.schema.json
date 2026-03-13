@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.index.schema.json",
+  "title": "SailPoint ISC Transform - Index Schema (Overall Shape)",
+  "description": "Validates the overall transform object shape (name/type/attributes). Operation-specific validation should be performed by an operation schema (e.g., accountAttribute) or a registry-driven linter.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "type"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Root transform name (nested transforms often omit 'name' in docs)."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Transform operation type (e.g., 'accountAttribute', 'conditional', 'dateCompare')."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Operation-specific attributes. Some transforms support explicit 'input' as an attribute to override implicit input.",
+      "additionalProperties": true,
+      "properties": {
+        "input": {
+          "description": "Optional explicit input. Allowed shape varies by operation; accept any JSON value at index level.",
+          "type": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array",
+            "null"
+          ]
+        }
+      }
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "description": "Optional flag (where supported) to re-evaluate every evening during identity refresh.",
+      "default": false
+    }
+  }
+}

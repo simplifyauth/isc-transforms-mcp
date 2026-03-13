@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.firstValid.schema.json",
+  "title": "SailPoint ISC Transform Schema - firstValid",
+  "description": "Strict schema derived from SailPoint official First Valid operation documentation. Returns the first non-null value from a list of values/transforms. Optional ignoreErrors controls whether evaluation errors are ignored.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "firstValid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "values"
+      ],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Ordered list of values/transforms. The first non-null result is returned.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array"
+              },
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/NestedTransform"
+              }
+            ]
+          }
+        },
+        "ignoreErrors": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, errors from evaluating a value/transform are ignored and evaluation continues. Default false."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used inside values[]; docs examples often omit 'name' for nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "firstValid",
+      "name": "First Valid Transform",
+      "attributes": {
+        "values": [
+          {
+            "type": "identityAttribute",
+            "attributes": {
+              "name": "preferredName"
+            }
+          },
+          {
+            "type": "identityAttribute",
+            "attributes": {
+              "name": "givenName"
+            }
+          }
+        ],
+        "ignoreErrors": false
+      }
+    }
+  ]
+}

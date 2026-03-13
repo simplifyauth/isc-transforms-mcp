@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.usernameGenerator.schema.json",
+  "title": "SailPoint ISC Transform Schema - usernameGenerator",
+  "description": "Strict schema derived from SailPoint official Username Generator operation documentation. This transform is intended for use within an account create profile; doc examples show the transform object embedded under a create profile attribute entry's 'transform' field and do not include a transform-level 'name'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "attributes"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. In general transform syntax, only the root-level transform has a name; nested transforms omit it."
+    },
+    "type": {
+      "const": "usernameGenerator"
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Username generator configuration plus optional dynamic variables (per docs).",
+      "required": [
+        "patterns"
+      ],
+      "properties": {
+        "patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "A JSON array of patterns for the generator to evaluate for uniqueness, in sequential order. Docs allow using 'uniqueCounter' as a reserved variable (shown as ${uniqueCounter} in examples). Docs also state that if a pattern contains uniqueCounter, it must be the last pattern."
+        },
+        "sourceCheck": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether the generator checks only the ISC database or queries the target system directly. true = check target system directly (only if the system supports getObject); false = check only the ISC database (default)."
+        }
+      },
+      "additionalProperties": {
+        "description": "Dynamic variable value used in patterns. Docs describe these as transforms.",
+        "$ref": "#/$defs/NestedTransform"
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as a dynamic variable (e.g., fn, ln, fi, mi). Docs examples for nested transforms typically omit 'name'.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform (may be omitted for operations without attributes)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "usernameGenerator",
+      "attributes": {
+        "sourceCheck": true,
+        "patterns": [
+          "$fn.$ln${uniqueCounter}"
+        ],
+        "fn": {
+          "type": "identityAttribute",
+          "attributes": {
+            "name": "firstname"
+          }
+        },
+        "ln": {
+          "type": "identityAttribute",
+          "attributes": {
+            "name": "lastname"
+          }
+        }
+      }
+    }
+  ]
+}

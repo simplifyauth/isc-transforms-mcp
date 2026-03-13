@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.randomNumeric.schema.json",
+  "title": "SailPoint ISC Transform Schema - randomNumeric",
+  "description": "Strict schema derived from SailPoint official Random Numeric operation documentation. Generates a random numeric string. Optional length defaults to 10 and maximum allowable is 450.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "randomNumeric"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional configuration. Only 'length' is documented.",
+      "properties": {
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 450,
+          "default": 10,
+          "description": "Length of the random number string. Default 10; maximum 450."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "randomNumeric",
+      "name": "Random Numeric Transform"
+    },
+    {
+      "type": "randomNumeric",
+      "name": "Random Numeric Transform (Length 6)",
+      "attributes": {
+        "length": 6
+      }
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.conditional.schema.json",
+  "title": "SailPoint ISC Transform Schema - conditional",
+  "description": "Strict schema derived from SailPoint official Conditional operation documentation. Allows dynamic variables within attributes as additional properties (per docs). Runtime considerations (not fully enforceable by JSON Schema): operands in expression cannot be null; string comparisons are case-sensitive; expression operator must be 'eq'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "conditional"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Conditional logic configuration, plus optional dynamic variables (per docs).",
+      "additionalProperties": {
+        "description": "Dynamic variables referenced via $variableName. Can be literals or nested transforms.",
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "array"
+          },
+          {
+            "type": "object"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/$defs/NestedTransform"
+          }
+        ]
+      },
+      "required": [
+        "expression",
+        "positiveCondition",
+        "negativeCondition"
+      ],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Comparison statement of the form 'ValueA eq ValueB'. Only 'eq' is valid.",
+          "pattern": "^.*\\beq\\b.*$"
+        },
+        "positiveCondition": {
+          "type": "string",
+          "minLength": 0,
+          "description": "Output when expression evaluates to true. May reference a dynamic variable via $var."
+        },
+        "negativeCondition": {
+          "type": "string",
+          "minLength": 0,
+          "description": "Output when expression evaluates to false. May reference a dynamic variable via $var."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as a dynamic variable. Docs examples commonly omit 'name' in nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "conditional",
+      "name": "Test Conditional Transform",
+      "attributes": {
+        "expression": "$department eq Science",
+        "positiveCondition": "true",
+        "negativeCondition": "false",
+        "department": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "department"
+          }
+        }
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "Test Conditional Transform (dynamic result)",
+      "attributes": {
+        "expression": "$department eq Science",
+        "positiveCondition": "$scienceBuilding",
+        "negativeCondition": "$adminBuilding",
+        "department": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "department"
+          }
+        },
+        "scienceBuilding": {
+          "type": "static",
+          "attributes": {
+            "value": "Building S"
+          }
+        },
+        "adminBuilding": {
+          "type": "static",
+          "attributes": {
+            "value": "Building A"
+          }
+        }
+      }
+    }
+  ]
+}

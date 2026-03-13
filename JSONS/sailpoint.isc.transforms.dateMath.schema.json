@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.dateMath.schema.json",
+  "title": "SailPoint ISC Transform Schema - dateMath",
+  "description": "Strict schema derived from the SailPoint official Date Math operation documentation. Adds/subtracts/rounds components of an incoming ISO8601 UTC timestamp, or uses the keyword 'now'. Other considerations from docs: input must be ISO8601 UTC; rounding by 'week' is not supported; if 'now' is used and an 'input' attribute is also provided, the transform prefers 'now' and ignores 'input'. Output format is yyyy-MM-dd'T'HH:mm (not ISO8601); convert to ISO8601 via dateFormat when embedding in other transforms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "dateMath"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expression"
+      ],
+      "properties": {
+        "expression": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Date-math expression. Allowed units: y, M, w, d, h, m, s and keyword 'now'. Allowed operators: +, -, / (round). Docs note rounding with week is not supported.",
+          "pattern": "^(?!.*\\/w)(?:now|[0-9yMwdhms+\\-\\/]+)$"
+        },
+        "roundUp": {
+          "type": "boolean",
+          "default": false,
+          "description": "When expression includes rounding '/', true rounds up (truncate + add one unit); false truncates only. Default false."
+        },
+        "input": {
+          "description": "Explicitly defines the input data passed into the transform (nested transform object). If omitted, uses UI-configured input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as explicit input. Docs examples frequently omit 'name' for nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "dateMath",
+      "name": "Date Math Transform",
+      "attributes": {
+        "expression": "now-5d/d",
+        "roundUp": false
+      }
+    },
+    {
+      "type": "dateMath",
+      "name": "Date Math Transform (Explicit Input)",
+      "attributes": {
+        "expression": "+12h/s",
+        "roundUp": true,
+        "input": {
+          "type": "dateFormat",
+          "attributes": {
+            "input": {
+              "type": "accountAttribute",
+              "attributes": {
+                "sourceName": "HR Source",
+                "attributeName": "startDate"
+              }
+            },
+            "inputFormat": "MMM dd yyyy, HH:mm:ss.SSS",
+            "outputFormat": "ISO8601"
+          }
+        }
+      }
+    }
+  ]
+}

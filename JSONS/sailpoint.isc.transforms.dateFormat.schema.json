@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.dateFormat.schema.json",
+  "title": "SailPoint ISC Transform Schema - dateFormat",
+  "description": "Strict schema derived from SailPoint official Date Format operation documentation. Converts datetime strings from one format to another. inputFormat/outputFormat may be Java SimpleDateFormat patterns or built-in named formats (ISO8601, LDAP, PEOPLE_SOFT, EPOCH_TIME_JAVA, EPOCH_TIME_WIN32). Note: The docs state this transform does not support the 'now' keyword as an input value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "dateFormat"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Date format configuration (optional). If omitted, inputFormat and outputFormat default to ISO8601.",
+      "additionalProperties": false,
+      "properties": {
+        "inputFormat": {
+          "type": "string",
+          "default": "ISO8601",
+          "description": "Format of the incoming date. Java SimpleDateFormat pattern or built-in named format."
+        },
+        "outputFormat": {
+          "type": "string",
+          "default": "ISO8601",
+          "description": "Desired output format. Java SimpleDateFormat pattern or built-in named format."
+        },
+        "input": {
+          "description": "Explicitly defines the input data passed into the transform. Docs specify an object; in practice this is a nested transform object. If omitted, the transform uses the UI-configured source+attribute input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used for explicit input.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "dateFormat",
+      "name": "Date Format Transform",
+      "attributes": {
+        "inputFormat": "EPOCH_TIME_JAVA",
+        "outputFormat": "ISO8601"
+      }
+    },
+    {
+      "type": "dateFormat",
+      "name": "Date Format Transform (US date to DB)",
+      "attributes": {
+        "inputFormat": "M/d/yyyy",
+        "outputFormat": "yyyy-MM-dd"
+      }
+    }
+  ]
+}

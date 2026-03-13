@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "isc-transforms": {
+      "command": "node",
+      "args": ["C:\\Users\\coalf\\Claude\\isc-mcp-server\\dist\\index.js"],
+      "env": {
+        "ISC_TENANT": "YOUR-TENANT.identitynow.com",
+        "ISC_PAT_CLIENT_ID": "YOUR_CLIENT_ID",
+        "ISC_PAT_CLIENT_SECRET": "YOUR_CLIENT_SECRET"
+      }
+    }
+  }
+}

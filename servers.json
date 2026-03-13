@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "isc-lead-dev": {
+      "transport": "stdio",
+      "command": "node",
+      "args": ["C:\\Users\\coalf\\OneDrive\\development\\isc-mcp-server\\dist\\index.js"],
+      "env": {
+        "ISC_API_BASE_URL": "https://devrel-ga-8368.api.identitynow-demo.com",
+        "ISC_API_VERSION": "v3",
+        "ISC_PAT_CLIENT_ID": "2a14330fcc7347638515ca6b7a67fb2a",
+        "ISC_PAT_CLIENT_SECRET": "5296759044277ab57b15d56d6ce547166469e75eaeec4b00c3da0bfd2506160a",
+        "ISC_MCP_MODE": "readonly",
+        "ISC_MCP_DEBUG": "false",
+        "ISC_TIMEOUT_MS": "30000"
+      }
+    }
+  }
+}

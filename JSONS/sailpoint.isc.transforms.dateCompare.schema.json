@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.dateCompare.schema.json",
+  "title": "SailPoint ISC Transform Schema - dateCompare",
+  "description": "Strict schema derived from the SailPoint official Date Compare operation documentation. Compares firstDate and secondDate (ISO8601 date-time strings or the keyword 'now', or nested transforms producing those values) using operator LT/LTE/GT/GTE, and returns positiveCondition or negativeCondition.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "dateCompare"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "firstDate",
+        "secondDate",
+        "operator",
+        "positiveCondition",
+        "negativeCondition"
+      ],
+      "properties": {
+        "firstDate": {
+          "$ref": "#/$defs/DateOperand"
+        },
+        "secondDate": {
+          "$ref": "#/$defs/DateOperand"
+        },
+        "operator": {
+          "type": "string",
+          "description": "Comparison operator: LT, LTE, GT, GTE (docs list uppercase; examples show lowercase).",
+          "enum": [
+            "LT",
+            "LTE",
+            "GT",
+            "GTE",
+            "lt",
+            "lte",
+            "gt",
+            "gte"
+          ]
+        },
+        "positiveCondition": {
+          "type": "string",
+          "description": "Value to return if the comparison evaluates to true."
+        },
+        "negativeCondition": {
+          "type": "string",
+          "description": "Value to return if the comparison evaluates to false."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "DateOperand": {
+      "description": "A date operand: ISO8601 date-time string, the keyword 'now', or a nested transform returning an ISO8601 value.",
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "now"
+        },
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "$ref": "#/$defs/NestedTransform"
+        }
+      ]
+    },
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object. In SailPoint docs, nested transforms commonly omit 'name'. Operation-specific validation should be applied by the nested transform's own schema.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "dateCompare",
+      "name": "Date Compare Transform",
+      "attributes": {
+        "firstDate": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "termination_date"
+          }
+        },
+        "secondDate": "now",
+        "operator": "gt",
+        "positiveCondition": "active",
+        "negativeCondition": "terminated"
+      }
+    },
+    {
+      "type": "dateCompare",
+      "name": "Date Compare Transform (Legacy Cutover)",
+      "attributes": {
+        "firstDate": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "hire_date"
+          }
+        },
+        "secondDate": {
+          "type": "dateFormat",
+          "attributes": {
+            "input": "12/31/1995",
+            "inputFormat": "M/d/yyyy",
+            "outputFormat": "ISO8601"
+          }
+        },
+        "operator": "lte",
+        "positiveCondition": "legacy",
+        "negativeCondition": "regular"
+      }
+    }
+  ]
+}

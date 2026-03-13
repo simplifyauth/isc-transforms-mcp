@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.decomposeDiacriticalMarks.schema.json",
+  "title": "SailPoint ISC Transform Schema - decomposeDiacriticalMarks",
+  "description": "Strict schema derived from SailPoint official Decompose Diacritical Marks operation docs. Docs state this transform requires only top-level 'type' and 'name'. An optional 'attributes' object may be provided with an optional 'input' object to explicitly define input. If 'input' is omitted, ISC uses the UI-configured source+attribute input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "decomposeDiacriticalMarks"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional configuration. Only 'input' is documented.",
+      "properties": {
+        "input": {
+          "description": "Explicit input data passed into the transform (nested transform object).",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used for explicit input. Docs examples commonly omit 'name' for nested transforms.",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "decomposeDiacriticalMarks",
+      "name": "Test Decompose Diacritical Marks Transform"
+    },
+    {
+      "type": "decomposeDiacriticalMarks",
+      "name": "Decompose Diacritical Marks Transform",
+      "attributes": {
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "LastName"
+          }
+        }
+      }
+    }
+  ]
+}

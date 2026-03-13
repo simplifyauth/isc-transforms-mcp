@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.static.schema.json",
+  "title": "SailPoint ISC Transform Schema - static",
+  "description": "Strict schema derived from SailPoint official Static operation documentation. Returns a fixed string value. Docs also allow Velocity Template Language (VTL) in the value, and allow dynamic variables in attributes to be referenced within the VTL.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "static"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Static value plus optional dynamic variables (per docs).",
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "Static string value or Velocity template."
+        }
+      },
+      "additionalProperties": {
+        "description": "Dynamic variables referenced in Velocity template. Can be literals or nested transforms.",
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "array"
+          },
+          {
+            "type": "object"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/$defs/NestedTransform"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as a dynamic variable. Docs examples often omit 'name'.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform (may be omitted for operations without attributes)."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "static",
+      "name": "Static Transform",
+      "attributes": {
+        "value": "Contractor"
+      }
+    },
+    {
+      "type": "static",
+      "name": "Static Transform (Template)",
+      "attributes": {
+        "value": "${first}.${last}@example.com",
+        "first": {
+          "type": "identityAttribute",
+          "attributes": {
+            "name": "givenName"
+          }
+        },
+        "last": {
+          "type": "identityAttribute",
+          "attributes": {
+            "name": "familyName"
+          }
+        }
+      }
+    }
+  ]
+}

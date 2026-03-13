@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment — NEVER commit credentials
+.env
+.env.*
+!.env.example
+
+# API key store (server-side runtime data)
+data/
+
+# Logs
+logs/
+*.log
+
+# npm pack artifacts
+*.tgz
+*.zip
+
+#backup files
+*.bak
+*.bkp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

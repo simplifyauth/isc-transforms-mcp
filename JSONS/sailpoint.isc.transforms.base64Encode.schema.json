@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.base64Encode.schema.json",
+  "title": "SailPoint ISC Transform Schema - base64Encode",
+  "description": "Strict schema derived from the SailPoint official Base64 Encode operation documentation. This operation uses the incoming value (implicit input from Identity Profile mapping) and does not define an 'attributes' object. Runtime null-handling: if the input is null, output is null.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name"
+  ],
+  "properties": {
+    "type": {
+      "const": "base64Encode"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be re-evaluated every evening as part of identity refresh. Default false."
+    }
+  },
+  "examples": [
+    {
+      "type": "base64Encode",
+      "name": "Base64 Encode Transform"
+    }
+  ]
+}

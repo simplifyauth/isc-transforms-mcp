@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.lookup.schema.json",
+  "title": "SailPoint ISC Transform Schema - lookup",
+  "description": "Strict schema derived from the SailPoint official Lookup operation documentation. Lookup returns a value from a key/value table using the incoming value as the key. Per docs, the table must include a 'default' key to avoid runtime errors when the lookup key is missing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "lookup"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table"
+      ],
+      "properties": {
+        "table": {
+          "type": "object",
+          "description": "Map of input keys to output values. Must include 'default'.",
+          "additionalProperties": {
+            "type": "string",
+            "description": "Lookup output value."
+          },
+          "required": [
+            "default"
+          ]
+        },
+        "input": {
+          "description": "Optional explicit input to use as the lookup key (nested transform). If omitted, uses UI-configured input.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used for explicit input (name optional in docs).",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "lookup",
+      "name": "Lookup Transform",
+      "attributes": {
+        "table": {
+          "US": "United States",
+          "IN": "India",
+          "default": "Unknown"
+        }
+      }
+    }
+  ]
+}

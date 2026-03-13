@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sailpoint.isc.transforms.indexOf.schema.json",
+  "title": "SailPoint ISC Transform Schema - indexOf",
+  "description": "Strict schema derived from the SailPoint official Index Of operation documentation. Finds the beginning index of 'substring' within the incoming value. If not found, the transform returns -1 (runtime behavior).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "name",
+    "attributes"
+  ],
+  "properties": {
+    "type": {
+      "const": "indexOf"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requiresPeriodicRefresh": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the transform logic should be reevaluated every evening as part of identity refresh. Default false."
+    },
+    "attributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "substring"
+      ],
+      "properties": {
+        "substring": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The substring to search for. Returns -1 (runtime) if not found."
+        },
+        "input": {
+          "description": "Optional explicit input passed into the transform. If omitted, ISC uses input from the source+attribute combination configured in the UI.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NestedTransform"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "NestedTransform": {
+      "type": "object",
+      "description": "Nested transform object used as explicit input (name optional in docs).",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiresPeriodicRefresh": {
+          "type": "boolean"
+        },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Operation-specific attributes for the nested transform."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "attributes": {
+        "substring": "admin_"
+      },
+      "type": "indexOf",
+      "name": "Index Of Transform"
+    }
+  ]
+}
