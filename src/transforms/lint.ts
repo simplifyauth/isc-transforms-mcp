@@ -54,7 +54,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   rightPad:       new Set(["length", "padding", "input"]),
   rule:           "open",     // rule-specific attributes vary
   split:          new Set(["delimiter", "index", "input"]),
-  static:         new Set(["value"]),
+  static:         "open",     // value + any named VTL dynamic variable keys allowed per docs
   substring:      new Set(["begin", "end", "input"]),
   trim:           new Set(["input"]),
   upper:          new Set(["input"]),
@@ -838,9 +838,12 @@ function lintSubstring(attrs: any): LintMessage[] {
 
 function lintStatic(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
-  if (attrs?.value !== undefined && typeof attrs.value !== "string") {
+  // Presence check is handled by checkRequired (spec.requiredAttributes).
+  // Here we only validate the type when value is present.
+  if (attrs?.value !== undefined && attrs?.value !== null && typeof attrs.value !== "string") {
     push(msgs, "error", "value must be a string.", "attributes.value");
   }
+  // Any other keys in attributes are valid dynamic VTL variable definitions — no unknown-attribute errors.
   return msgs;
 }
 
