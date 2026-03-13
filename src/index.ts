@@ -417,6 +417,71 @@ export async function buildMcpServer(cfg: ReturnType<typeof loadConfig>) {
     }
   );
 
+  // ── 7b. Full operation catalog (all ops + schemas in one call) ───────────
+
+  server.registerTool(
+    tn("isc.transforms.operationCatalog"),
+    {
+      title: "Full Transform Operation Catalog",
+      description:
+        "Returns EVERYTHING the LLM needs to build any SailPoint ISC transform — all 39 operation types " +
+        "in a single response. For each operation: type key, title, required attributes (with types), " +
+        "optional attributes, attribute constraints, doc URL, scaffold example, and JSON Schema. " +
+        "Call this FIRST before building any transform. Use it to decide which operation(s) to use, " +
+        "understand what attributes are required, and see a working scaffold to start from. " +
+        "This eliminates the need to call catalog, getSchema, and scaffold separately. " +
+        "OFFLINE — no ISC tenant required.",
+      inputSchema: z.object({
+        operation_types: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Optional list of specific operation types to return (e.g. ['dateCompare','dateMath','conditional']). " +
+            "Omit to return all 39 operations."
+          ),
+      }),
+    },
+    async ({ operation_types }) => {
+      const allTypes = listTransformTypes();
+      const requested: Array<keyof typeof TRANSFORM_CATALOG> =
+        operation_types && operation_types.length > 0
+          ? (operation_types
+              .map((t) => toCanonicalType(t) ?? t)
+              .filter((t) => (allTypes as string[]).includes(t)) as Array<keyof typeof TRANSFORM_CATALOG>)
+          : allTypes;
+
+      const items = requested.map((t) => {
+        const s = TRANSFORM_CATALOG[t];
+        const schema = getOperationSchema(t as string);
+        return {
+          type: s.type,
+          title: s.title,
+          doc_url: s.docUrl,
+          required_attributes: s.requiredAttributes ?? [],
+          attributes_optional: Boolean(s.attributesOptional),
+          is_rule_backed: Boolean(s.injectedAttributes),
+          scaffold: s.scaffold(`my-${t}-transform`),
+          json_schema: schema ?? null,
+        };
+      });
+
+      return {
+        content: [{
+          type: "text",
+          text: asText({
+            instruction:
+              "Use this catalog to select the right operation type(s) for the requirement. " +
+              "Check required_attributes to know what you must supply. " +
+              "Use scaffold as your starting JSON shape. " +
+              "Validate and lint the result after building.",
+            total_operations: items.length,
+            operations: items,
+          }),
+        }],
+      };
+    }
+  );
+
   // ── 8. Get JSON Schema for an operation ──────────────────────────────────
 
   server.registerTool(

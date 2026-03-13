@@ -964,5 +964,56 @@ export function lintTransform(input: any): { normalized: any; messages: LintMess
   if (requestedType === "randomAlphaNumeric" || requestedType === "randomNumeric") messages.push(...lintRandom(requestedType, attrs));
   if (requestedType === "rfc5646")                      messages.push(...lintRfc5646(attrs));
 
+  // --- Recursive nested transform lint ---
+  // Recursively lint every nested transform found inside attributes.
+  // We start from normalized.attributes (not the root) to avoid double-linting root.
+  if (normalized.attributes && typeof normalized.attributes === "object") {
+    messages.push(...lintNestedTransforms(normalized.attributes, "attributes"));
+  }
+
   return { normalized, messages };
+}
+
+/**
+ * Recursively walks a subtree (starting from a transform's attributes object)
+ * and lints every nested object that carries a 'type' field — i.e. nested transforms.
+ * Reports errors with a path prefix so the user knows exactly where the problem is.
+ */
+function lintNestedTransforms(subtree: any, path: string): LintMessage[] {
+  if (!subtree || typeof subtree !== "object") return [];
+  const msgs: LintMessage[] = [];
+
+  if (Array.isArray(subtree)) {
+    subtree.forEach((item, idx) => {
+      const itemPath = `${path}[${idx}]`;
+      if (item && typeof item === "object" && typeof item.type === "string") {
+        // lintTransform already recurses into the nested transform's own attributes,
+        // so we only call it here — no additional recursion needed.
+        const result = lintTransform(item);
+        result.messages.forEach((m) =>
+          msgs.push({ ...m, path: `${itemPath}${m.path ? "." + m.path : ""}` })
+        );
+      } else if (item && typeof item === "object") {
+        msgs.push(...lintNestedTransforms(item, itemPath));
+      }
+    });
+    return msgs;
+  }
+
+  for (const [key, value] of Object.entries(subtree)) {
+    const childPath = `${path}.${key}`;
+    if (value && typeof value === "object" && typeof (value as any).type === "string") {
+      // Nested transform object — lintTransform handles further recursion internally.
+      const result = lintTransform(value as any);
+      result.messages.forEach((m) =>
+        msgs.push({ ...m, path: `${childPath}${m.path ? "." + m.path : ""}` })
+      );
+    } else if (Array.isArray(value)) {
+      msgs.push(...lintNestedTransforms(value, childPath));
+    } else if (value && typeof value === "object") {
+      msgs.push(...lintNestedTransforms(value, childPath));
+    }
+  }
+
+  return msgs;
 }
