@@ -18,23 +18,29 @@
 
 ---
 
-## How to Use — Recommended Prompt Pattern
+## How to Use — Strict Prompt Pattern
 
-For best results, always ask Claude to follow this workflow: **catalog → build → lint until clean → output JSON**.
-
-The magic phrase to use:
+Copy and adapt this exact structure. The explicit step numbering and the **DO NOT** rules are what keep Claude on track.
 
 ```
-Use MCP tools only. [describe your transform requirement].
-Start with isc_transforms_operationCatalog, then build the transform,
-lint it until there are no errors, and give me the final JSON.
-```
+Use MCP tools only. Follow these steps exactly and do not skip any:
 
-Claude will then:
-1. Call `isc_transforms_operationCatalog` to get exact attribute specs for the operations it needs
-2. Build the transform JSON from scratch using those specs
-3. Call `isc_transforms_lint` repeatedly, fixing any errors each round
-4. Return the final clean JSON once lint passes with 0 errors and 0 warnings
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
+
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+[describe your transform requirement here]
+```
 
 ---
 
@@ -43,66 +49,139 @@ Claude will then:
 ### Lifecycle State from Start/End Dates
 
 ```
-Use MCP tools only. Create a transform to calculate cloudLifecycleState based on:
-- startDate > today → prehire
-- startDate ≤ today AND endDate ≥ today AND employeeStatus = LEAVE → leave
-- startDate ≤ today AND endDate ≥ today AND employeeStatus = ACTIVE → active
-- endDate < today AND endDate ≥ today-30 → inactive
-- endDate < today-30 → archived
+Use MCP tools only. Follow these steps exactly and do not skip any:
 
-Inputs from source SimplifyAuth-HRMS:
-  startDate (attribute: startDate, format: dd-MM-yyyy)
-  endDate   (attribute: endDate,   format: dd-MM-yyyy)
-  status    (attribute: employeeStatus)
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
 
-Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON.
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement:
+Create a transform named cloudLifecycleState with requiresPeriodicRefresh: true.
+Logic:
+  - startDate > today → prehire
+  - startDate ≤ today AND endDate ≥ today AND employeeStatus = LEAVE → leave
+  - startDate ≤ today AND endDate ≥ today AND employeeStatus = ACTIVE → active
+  - endDate < today AND endDate ≥ today-30 → inactive
+  - endDate < today-30 → archived
+Inputs (source: SimplifyAuth-HRMS):
+  - startDate   attribute: startDate,       format: dd-MM-yyyy
+  - endDate     attribute: endDate,         format: dd-MM-yyyy
+  - leaveStatus attribute: employeeStatus
 ```
 
 ### Temporary Password from Account Attributes
 
 ```
-Use MCP tools only. Build a static transform named Temporary-Password that produces:
+Use MCP tools only. Follow these steps exactly and do not skip any:
+
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
+
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement:
+Build a static transform named Temporary-Password that produces:
   ${firstInitialLower}${lastNameProper}${hireMonth}RstP*!7
-
-Where:
-  firstInitialLower = lowercase first character of first_name (source: HRMS)
-  lastNameProper    = uppercase first char + rest of last_name (source: HRMS)
-  hireMonth         = 2-digit month from hire_date (format: yyyy-MM-dd, source: HRMS)
-
-Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON.
+Variables (source: HRMS):
+  - firstInitialLower = lowercase first character of first_name
+  - lastNameProper    = uppercase first char of last_name + remaining chars of last_name
+  - hireMonth         = 2-digit month extracted from hire_date (input format: yyyy-MM-dd)
 ```
 
 ### Username with Uniqueness Counter
 
 ```
-Use MCP tools only. Create a username transform:
-  first initial + last name, all lowercase, max 20 chars.
-  If taken, append a number (uniqueCounter).
-  Source: Workday HR, attributes: firstName and lastName.
+Use MCP tools only. Follow these steps exactly and do not skip any:
 
-Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON.
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
+
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement:
+Create a username transform named username-generator.
+  - Pattern: first initial + last name, all lowercase, max 20 chars
+  - If the username is already taken, append a uniqueCounter
+  - Source: Workday HR, attributes: firstName and lastName
 ```
 
 ### Email from Name Attributes
 
 ```
-Use MCP tools only. Build a transform that generates an email address as:
-  firstname.lastname@acme.com
-  Normalize both names (remove diacritics, lowercase) before concatenating.
-  Source: Active Directory, attributes: givenName and sn.
+Use MCP tools only. Follow these steps exactly and do not skip any:
 
-Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON.
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
+
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement:
+Build a transform named email-generator that produces: firstname.lastname@acme.com
+  - Normalize both names (remove diacritics, lowercase) before concatenating
+  - Source: Active Directory, attributes: givenName and sn
 ```
 
 ### Fallback Chain
 
 ```
-Use MCP tools only. Build a transform that returns the first non-empty value from:
+Use MCP tools only. Follow these steps exactly and do not skip any:
+
+Step 1 — Call isc_transforms_operationCatalog to retrieve the full spec for every
+operation type you plan to use. Do not build anything yet.
+
+Step 2 — Build the complete transform JSON using only the attribute names, types,
+and structure from the catalog response in Step 1.
+
+Step 3 — Call isc_transforms_lint on the JSON you built.
+  - If lint returns errors or warnings, fix every one of them and call
+    isc_transforms_lint again.
+  - Repeat until isc_transforms_lint returns ok: true with 0 errors and 0 warnings.
+  - DO NOT output the final JSON until lint passes completely.
+
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement:
+Build a transform named email-fallback that returns the first non-empty value from:
   1. workEmail (source: HR System)
   2. personalEmail (source: HR System)
-  3. static fallback: noemail@acme.com
-
-Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON.
+  3. Static fallback: noemail@acme.com
 ```
 
 ---
@@ -144,8 +223,18 @@ Look for the 🔨 hammer icon at the bottom of the chat input — that confirms 
 
 ```
 "Use isc_ping to check the server"
-"Use MCP tools only. Build a transform that lowercases the first name from Workday.
- Start with isc_transforms_operationCatalog, lint until no errors, give me the JSON."
+```
+
+```
+Use MCP tools only. Follow these steps exactly and do not skip any:
+Step 1 — Call isc_transforms_operationCatalog for the operations you need. Do not build yet.
+Step 2 — Build the transform JSON using only specs from Step 1.
+Step 3 — Call isc_transforms_lint. Fix all errors and repeat until ok: true, 0 errors, 0 warnings.
+         DO NOT output JSON until lint passes completely.
+Step 4 — Output the final lint-clean JSON and nothing else.
+
+Transform requirement: Build a transform that lowercases the first name from Workday HR
+(source: Workday, attribute: firstName). Name it lowercase-firstname.
 ```
 
 ---
