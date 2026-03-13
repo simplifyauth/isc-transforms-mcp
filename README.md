@@ -194,9 +194,9 @@ All settings are optional for Personal use. Enterprise users need the `ISC_*` cr
 
 ## Supported Operations
 
-All 44 SailPoint ISC transform operation types are fully supported for generation, validation, and linting:
+All 39 SailPoint ISC transform operation types are fully supported for generation, validation, and linting:
 
-`accountAttribute` · `base64Decode` · `base64Encode` · `concat` · `conditional` · `dateCompare` · `dateFormat` · `dateMath` · `decomposeDiacriticalMarks` · `displayName` · `e164phone` · `firstValid` · `generateRandomString`\* · `getEndOfString`\* · `getReferenceIdentityAttribute`\* · `identityAttribute` · `indexOf` · `iso3166` · `join` · `lastIndexOf` · `leftPad` · `lookup` · `lower` · `nameNormalizer` · `normalizeNames` · `randomAlphaNumeric` · `randomNumeric` · `reference` · `replace` · `replaceAll` · `rfc5646` · `rightPad` · `rule` · `split` · `static` · `substring` · `trim` · `upper` · `usernameGenerator` · `uuid`
+`accountAttribute` · `base64Decode` · `base64Encode` · `concat` · `conditional` · `dateCompare` · `dateFormat` · `dateMath` · `decomposeDiacriticalMarks` · `displayName` · `e164phone` · `firstValid` · `generateRandomString`\* · `getEndOfString`\* · `getReferenceIdentityAttribute`\* · `identityAttribute` · `indexOf` · `iso3166` · `join` · `lastIndexOf` · `leftPad` · `lookup` · `lower` · `normalizeNames` · `randomAlphaNumeric` · `randomNumeric` · `reference` · `replace` · `replaceAll` · `rfc5646` · `rightPad` · `rule` · `split` · `static` · `substring` · `trim` · `upper` · `usernameGenerator` · `uuid`
 
 \* Rule-backed operations (executed via the Cloud Services Deployment Utility).
 
