@@ -134,7 +134,7 @@ The 4 tools below connect to a live ISC tenant and require an **Enterprise licen
 | `isc_transforms_upsert` | Create or update with dry-run preview + JSON-Patch diff + lint before write |
 | `isc_transforms_findReferences` | Scan identity profiles for every place a transform is referenced |
 
-**Enterprise plan coming soon** — join the waitlist by opening an [issue](https://github.com/simplifyauth/isc-transforms-mcp/issues) or emailing coalfieldexpress@gmail.com.
+**Enterprise plan coming soon** — [join the waitlist](https://docs.google.com/forms/d/e/1FAIpQLScrSaxD8sev0NuX0t5RXo5B9M0qIz8FQW5Wps2WJAF7fqbs4w/viewform) to be notified when it launches.
 
 Once you have a license key, add it to your Claude Desktop config:
 

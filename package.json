@@ -5,7 +5,7 @@
   "description": "MCP server for SailPoint Identity Security Cloud (ISC) Transform authoring — scaffold, strict lint, catalog, and safe upsert to live tenants.",
   "author": {
     "name": "Amit",
-    "email": "coalfieldexpress@gmail.com"
+    "email": "amit@simplifyauth.com"
   },
   "license": "MIT",
   "keywords": [
