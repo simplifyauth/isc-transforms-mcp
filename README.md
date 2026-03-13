@@ -14,7 +14,7 @@
 `isc-transforms-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude a complete SailPoint ISC transform authoring toolkit. Instead of handwriting transform JSON, debugging schema errors in the UI, and cross-referencing the docs manually — you describe what you need in plain English and Claude does the rest.
 
 **Free (Personal)** — 10 offline tools. No ISC tenant needed. Works entirely on your laptop.
-**Enterprise** — All 14 tools, including live tenant operations (list, get, push, find references). See [Enterprise Plan](#-enterprise-plan).
+**Enterprise (coming soon)** — All 14 tools, including live tenant operations (list, get, push, find references). See [Enterprise Plan](#-enterprise-plan).
 
 ---
 
@@ -134,7 +134,7 @@ The 4 tools below connect to a live ISC tenant and require an **Enterprise licen
 | `isc_transforms_upsert` | Create or update with dry-run preview + JSON-Patch diff + lint before write |
 | `isc_transforms_findReferences` | Scan identity profiles for every place a transform is referenced |
 
-**Get Enterprise →** [YOUR-STORE-URL](https://YOUR-STORE-URL)
+**Enterprise plan coming soon** — join the waitlist by opening an [issue](https://github.com/simplifyauth/isc-transforms-mcp/issues) or emailing coalfieldexpress@gmail.com.
 
 Once you have a license key, add it to your Claude Desktop config:
 
