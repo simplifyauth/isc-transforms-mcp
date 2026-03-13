@@ -13,8 +13,8 @@
 
 `isc-transforms-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude a complete SailPoint ISC transform authoring toolkit. Instead of handwriting transform JSON, debugging schema errors in the UI, and cross-referencing the docs manually — you describe what you need in plain English and Claude does the rest.
 
-**Free (Personal)** — 10 offline tools. No ISC tenant needed. Works entirely on your laptop.
-**Enterprise (coming soon)** — All 14 tools, including live tenant operations (list, get, push, find references). See [Enterprise Plan](#-enterprise-plan).
+**Free (Personal)** — 11 offline tools. No ISC tenant needed. Works entirely on your laptop.
+**Enterprise (coming soon)** — All 15 tools, including live tenant operations (list, get, push, find references). See [Enterprise Plan](#-enterprise-plan).
 
 ---
 
@@ -83,7 +83,7 @@ Look for the 🔨 hammer icon at the bottom of the chat input — that confirms 
 
 ## Free Tools (Phase 1 — No ISC Tenant Required)
 
-All 10 tools below work completely offline. No credentials, no tenant, no internet connection needed.
+All 11 tools below work completely offline. No credentials, no tenant, no internet connection needed.
 
 ### `isc_transforms_generate`
 Converts a plain-English requirement into a SailPoint ISC transform JSON payload. Parses your description for operation keywords, attribute names, date formats, and fallback hints. Returns the transform JSON, confidence level, alternative operations, and a link to the official SailPoint docs for that operation type.
@@ -95,7 +95,7 @@ Converts a plain-English requirement into a SailPoint ISC transform JSON payload
 ```
 
 ### `isc_transforms_validate`
-Two-stage JSON Schema validation powered by AJV and the official SailPoint JSON Schema pack. Stage 1 validates the root shape (name, type, attributes). Stage 2 validates against the operation-specific schema for all 44 operation types, including attribute requirements, allowed values, and nested transform shapes.
+Two-stage JSON Schema validation powered by AJV and the official SailPoint JSON Schema pack. Stage 1 validates the root shape (name, type, attributes). Stage 2 validates against the operation-specific schema for all 39 operation types, including attribute requirements, allowed values, and nested transform shapes.
 
 ### `isc_transforms_lint`
 27 semantic lint rules that go beyond what JSON Schema can check. Catches issues like multiple source references on `accountAttribute`, using `delimiter` instead of `separator` on `join`, invalid regex patterns, `requiresPeriodicRefresh` set as a string instead of boolean, missing `default` keys on `lookup` transforms, and 22 more. Errors include the doc URL for the affected operation so you know exactly what to fix.
@@ -109,8 +109,16 @@ Matches your description against 10 named nested-transform patterns and returns 
 ### `isc_transforms_generateTestCases`
 Generates 2–5 illustrative test cases for a transform: happy-path, null input, and edge cases. Each test case includes a description, sample input, expected output, and notes. Use these directly in the ISC transform tester.
 
+### `isc_transforms_operationCatalog`
+Returns everything needed to build any transform in a single call — all 39 operation types with type key, title, doc URL, required attributes, scaffold JSON, and full JSON Schema. Use this before building a transform so Claude has the exact attribute names, types, and constraints in one response. Optionally filter to specific operation types.
+
+```
+"Show me the full spec for dateCompare and dateMath"
+"What are all the required attributes for accountAttribute?"
+```
+
 ### `isc_transforms_catalog`
-Returns all 44+ supported SailPoint ISC transform operation types with: type key, human-readable title, required attributes, doc URL, schema coverage flag, and scaffold example. Essential reference when you are not sure which operation to use.
+Returns all 39 supported SailPoint ISC transform operation types with: type key, human-readable title, required attributes, doc URL, schema coverage flag, and scaffold example. Essential reference when you are not sure which operation to use.
 
 ### `isc_transforms_getSchema`
 Returns the full JSON Schema (Draft 2020-12) for any operation type — the exact schema used internally for validation. Useful when you want to understand precisely which attributes are required, optional, and what their constraints are.

@@ -36,28 +36,10 @@
         }
       },
       "additionalProperties": {
-        "description": "Dynamic variables referenced in Velocity template. Can be literals or nested transforms.",
-        "oneOf": [
+        "description": "Dynamic variables referenced in Velocity template. Can be string literals or nested transforms.",
+        "anyOf": [
           {
             "type": "string"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "array"
-          },
-          {
-            "type": "object"
-          },
-          {
-            "type": "null"
           },
           {
             "$ref": "#/$defs/NestedTransform"
