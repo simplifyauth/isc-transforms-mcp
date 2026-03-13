@@ -7,14 +7,18 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![MCP compatible](https://img.shields.io/badge/MCP-compatible-blue)](https://modelcontextprotocol.io)
 
+> **Community Project** — This is an independent, community-built tool. It is not affiliated with, endorsed by, or supported by SailPoint Technologies.
+
 ---
 
 ## What is this?
 
 `isc-transforms-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server that gives Claude a complete SailPoint ISC transform authoring toolkit. Instead of handwriting transform JSON, debugging schema errors in the UI, and cross-referencing the docs manually — you describe what you need in plain English and Claude does the rest.
 
-**Free (Personal)** — 11 offline tools. No ISC tenant needed. Works entirely on your laptop.
+**Free (Personal)** — 11 tools. No ISC tenant needed. Works entirely on your laptop.
 **Enterprise (coming soon)** — All 15 tools, including live tenant operations (list, get, find references). See [Enterprise Plan](#-enterprise-plan).
+
+> **Note on "no tenant needed":** The MCP server itself runs as a local Node.js process on your machine — it makes no calls to any ISC tenant for the free tools. Your transform JSON is validated and linted entirely locally. Claude (the AI) is a cloud service provided by Anthropic, so your conversation — including any transform JSON you share — passes through Anthropic's infrastructure as part of normal Claude usage, the same as any other Claude session.
 
 ---
 
@@ -241,7 +245,7 @@ Transform requirement: Build a transform that lowercases the first name from Wor
 
 ## Free Tools (Phase 1 — No ISC Tenant Required)
 
-All 11 tools below work completely offline. No credentials, no tenant, no internet connection needed.
+All 11 tools below run locally on your machine with no ISC tenant connection required. No ISC credentials needed.
 
 ### `isc_transforms_operationCatalog`
 **Start here when building any transform.** Returns everything needed in a single call — all 39 operation types with type key, title, doc URL, required attributes, scaffold JSON, and full JSON Schema. Optionally filter to specific operation types to keep the response focused.
