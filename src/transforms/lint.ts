@@ -216,40 +216,112 @@ function lintRuleBackedInvariants(requestedType: string, normalized: any, msgs: 
 function lintAccountAttribute(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
 
-  const sourceFields = ["sourceName", "applicationId", "applicationName"];
+  // --- 1. Source reference: exactly one of sourceName / applicationId / applicationName ---
+  const sourceFields = ["sourceName", "applicationId", "applicationName"] as const;
   const presentSources = sourceFields.filter(
     (f) => attrs?.[f] !== undefined && attrs?.[f] !== null && String(attrs[f]).trim() !== ""
   );
 
   if (presentSources.length === 0) {
-    push(
-      msgs, "error",
-      "accountAttribute requires exactly one source reference: sourceName, applicationId, or applicationName.",
+    push(msgs, "error",
+      "accountAttribute requires exactly one source reference: sourceName (display name), " +
+      "applicationId (external GUID), or applicationName (immutable internal name).",
       "attributes"
     );
   } else if (presentSources.length > 1) {
-    push(
-      msgs, "error",
-      `accountAttribute must have exactly ONE source reference; found multiple: ${presentSources.join(", ")}. Remove all but one.`,
+    push(msgs, "error",
+      `accountAttribute must have exactly ONE source reference; found multiple: ${presentSources.join(", ")}. ` +
+      "Remove all but one. Prefer applicationName for stability (display names can change).",
       "attributes"
     );
   }
 
-  // Type checks for optional boolean attrs
+  // --- 2. sourceName: non-empty, and warn about display-name fragility ---
+  if (attrs?.sourceName !== undefined) {
+    if (typeof attrs.sourceName !== "string" || attrs.sourceName.trim() === "") {
+      push(msgs, "error", "sourceName must be a non-empty string matching the source's display name.", "attributes.sourceName");
+    } else {
+      push(msgs, "warn",
+        "sourceName references the source display name, which can change. " +
+        "If the source is renamed the transform will break. Consider using applicationName (immutable) for long-term stability.",
+        "attributes.sourceName"
+      );
+    }
+  }
+
+  // --- 3. applicationId: non-empty string ---
+  if (attrs?.applicationId !== undefined) {
+    if (typeof attrs.applicationId !== "string" || attrs.applicationId.trim() === "") {
+      push(msgs, "error", "applicationId must be a non-empty string (external GUID of the source).", "attributes.applicationId");
+    }
+  }
+
+  // --- 4. applicationName: non-empty string ---
+  if (attrs?.applicationName !== undefined) {
+    if (typeof attrs.applicationName !== "string" || attrs.applicationName.trim() === "") {
+      push(msgs, "error", "applicationName must be a non-empty string (immutable internal source name).", "attributes.applicationName");
+    }
+  }
+
+  // --- 5. attributeName: required (caught by schema), but also check non-empty ---
+  if (attrs?.attributeName !== undefined) {
+    if (typeof attrs.attributeName !== "string" || attrs.attributeName.trim() === "") {
+      push(msgs, "error",
+        "attributeName must be a non-empty string matching the account attribute name in the source schema.",
+        "attributes.attributeName"
+      );
+    }
+  }
+
+  // --- 6. accountSortAttribute: non-empty string; default is 'created' ---
+  if (attrs?.accountSortAttribute !== undefined) {
+    if (typeof attrs.accountSortAttribute !== "string") {
+      push(msgs, "error", "accountSortAttribute must be a string (schema attribute name). Default is 'created'.", "attributes.accountSortAttribute");
+    } else if (attrs.accountSortAttribute.trim() === "") {
+      push(msgs, "error",
+        "accountSortAttribute must not be empty. Omit it to use the default ('created'), or provide a valid account schema attribute name.",
+        "attributes.accountSortAttribute"
+      );
+    }
+  }
+
+  // --- 7. accountSortDescending: boolean ---
   if (attrs?.accountSortDescending !== undefined && typeof attrs.accountSortDescending !== "boolean") {
-    push(msgs, "error", "accountSortDescending must be a boolean.", "attributes.accountSortDescending");
+    push(msgs, "error", "accountSortDescending must be a boolean (true = descending, false = ascending). Default is false.", "attributes.accountSortDescending");
   }
+
+  // --- 8. accountReturnFirstLink: boolean ---
   if (attrs?.accountReturnFirstLink !== undefined && typeof attrs.accountReturnFirstLink !== "boolean") {
-    push(msgs, "error", "accountReturnFirstLink must be a boolean.", "attributes.accountReturnFirstLink");
+    push(msgs, "error",
+      "accountReturnFirstLink must be a boolean. " +
+      "true = return the first sorted account's value even if null; false = skip nulls and return first non-null. Default is false.",
+      "attributes.accountReturnFirstLink"
+    );
   }
-  if (attrs?.accountSortAttribute !== undefined && typeof attrs.accountSortAttribute !== "string") {
-    push(msgs, "error", "accountSortAttribute must be a string.", "attributes.accountSortAttribute");
+
+  // --- 9. accountFilter: type, non-empty, and searchable-fields hint ---
+  if (attrs?.accountFilter !== undefined) {
+    if (typeof attrs.accountFilter !== "string") {
+      push(msgs, "error", "accountFilter must be a string (sailpoint.object.Filter expression).", "attributes.accountFilter");
+    } else if (attrs.accountFilter.trim() === "") {
+      push(msgs, "error", "accountFilter must not be empty if provided. Omit it to disable database-level filtering.", "attributes.accountFilter");
+    } else {
+      push(msgs, "info",
+        "accountFilter applies a database-level sailpoint.object.Filter. " +
+        "Only these fields are searchable at database level: nativeIdentity, displayName, entitlements. " +
+        "For other account attributes (e.g. custom fields, status), use accountPropertyFilter instead.",
+        "attributes.accountFilter"
+      );
+    }
   }
-  if (attrs?.accountFilter !== undefined && typeof attrs.accountFilter !== "string") {
-    push(msgs, "error", "accountFilter must be a string.", "attributes.accountFilter");
-  }
-  if (attrs?.accountPropertyFilter !== undefined && typeof attrs.accountPropertyFilter !== "string") {
-    push(msgs, "error", "accountPropertyFilter must be a string.", "attributes.accountPropertyFilter");
+
+  // --- 10. accountPropertyFilter: type and non-empty ---
+  if (attrs?.accountPropertyFilter !== undefined) {
+    if (typeof attrs.accountPropertyFilter !== "string") {
+      push(msgs, "error", "accountPropertyFilter must be a string (sailpoint.object.Filter expression).", "attributes.accountPropertyFilter");
+    } else if (attrs.accountPropertyFilter.trim() === "") {
+      push(msgs, "error", "accountPropertyFilter must not be empty if provided. Omit it to disable in-memory filtering.", "attributes.accountPropertyFilter");
+    }
   }
 
   return msgs;

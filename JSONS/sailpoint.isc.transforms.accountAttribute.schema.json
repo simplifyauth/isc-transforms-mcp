@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.accountAttribute.schema.json",
   "title": "SailPoint ISC Transform Schema - accountAttribute",
-  "description": "Strict schema derived from the SailPoint official Account Attribute operation documentation.",
+  "description": "Strict schema derived from the SailPoint official Account Attribute operation documentation. Retrieves a specific attribute value from an account associated with a source on an identity.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,15 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "accountAttribute"
+      "const": "accountAttribute",
+      "description": "Transform operation type. Must be exactly 'accountAttribute'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Set to true when the source account data changes frequently. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -32,113 +35,95 @@
         "sourceName": {
           "type": "string",
           "minLength": 1,
-          "description": "Source display name to search (e.g., 'Active Directory'). If the display name changes, this reference must be updated."
+          "description": "Source display name to search (e.g., 'Active Directory'). WARNING: references the mutable display name — if the source is renamed, this value must be updated. For stability, prefer applicationName. Mutually exclusive with applicationId and applicationName."
         },
         "applicationId": {
           "type": "string",
           "minLength": 1,
-          "description": "Alternative to sourceName: source external GUID."
+          "description": "External GUID of the source. Stable alternative to sourceName that does not break if the source is renamed. Mutually exclusive with sourceName and applicationName."
         },
         "applicationName": {
           "type": "string",
           "minLength": 1,
-          "description": "Alternative to sourceName: source immutable name."
+          "description": "Immutable internal source name. Most stable source reference — does not change when the source display name changes. Mutually exclusive with sourceName and applicationId."
         },
         "attributeName": {
           "type": "string",
           "minLength": 1,
-          "description": "Account attribute to return (must match the account attribute name visible in the UI or source schema)."
+          "description": "Name of the account attribute to retrieve. Must exactly match the attribute name visible in the source schema / account attribute list in the ISC UI."
         },
         "accountSortAttribute": {
           "type": "string",
           "minLength": 1,
           "default": "created",
-          "description": "Attribute name to sort returned accounts by when multiple accounts exist. Default 'created' (ascending; oldest wins)."
+          "description": "Account schema attribute used to sort multiple accounts before selecting one. Default is 'created' (ascending — oldest account wins). Must be a valid account schema attribute name."
         },
         "accountSortDescending": {
           "type": "boolean",
           "default": false,
-          "description": "Sort order when multiple accounts exist. Default false (ascending)."
+          "description": "Controls sort order when multiple accounts exist. false = ascending (oldest first, default). true = descending (newest first)."
         },
         "accountReturnFirstLink": {
           "type": "boolean",
           "default": false,
-          "description": "If true, return the value from the first account in the sorted list even if null; if false, return the first non-null value. Default false."
+          "description": "Controls null handling when multiple accounts exist. false = skip accounts with null values and return the first non-null (default). true = return the first sorted account's value even if it is null."
         },
         "accountFilter": {
           "type": "string",
           "minLength": 1,
-          "description": "Database filter (sailpoint.object.Filter) ANDed with the default source+identity filter. Only searchable fields are supported (nativeIdentity, displayName, entitlements)."
+          "description": "Database-level filter using sailpoint.object.Filter syntax. Applied before account retrieval. IMPORTANT: only the following fields are searchable at database level — nativeIdentity, displayName, entitlements. For other attributes (e.g. custom fields, status) use accountPropertyFilter. Example: !(nativeIdentity.startsWith(\"*DELETED*\"))"
         },
         "accountPropertyFilter": {
           "type": "string",
           "minLength": 1,
-          "description": "In-memory filter (sailpoint.object.Filter) applied after retrieval. All account attributes can be referenced."
+          "description": "In-memory filter using sailpoint.object.Filter syntax. Applied after account retrieval. All account attributes are available for filtering (not limited to searchable fields). Example: (status != \"terminated\")"
         },
         "input": {
-          "type": "object",
-          "description": "Explicit input object. If omitted, the transform uses implicit input configured via UI/source+attribute mapping.",
-          "additionalProperties": true
+          "description": "Explicit input data to override the implicit source+attribute mapping. Can be a nested transform object or a static string value.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "type": "string", "minLength": 1 },
+                "attributes": { "type": "object" }
+              },
+              "additionalProperties": true
+            }
+          ]
         }
       },
       "allOf": [
         {
-          "description": "Exactly one source reference must be provided: sourceName OR applicationId OR applicationName.",
+          "description": "Exactly one source reference must be provided: sourceName OR applicationId OR applicationName. Using more than one is not allowed.",
           "oneOf": [
             {
-              "required": [
-                "sourceName"
-              ],
+              "required": ["sourceName"],
               "not": {
                 "anyOf": [
-                  {
-                    "required": [
-                      "applicationId"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "applicationName"
-                    ]
-                  }
+                  { "required": ["applicationId"] },
+                  { "required": ["applicationName"] }
                 ]
               }
             },
             {
-              "required": [
-                "applicationId"
-              ],
+              "required": ["applicationId"],
               "not": {
                 "anyOf": [
-                  {
-                    "required": [
-                      "sourceName"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "applicationName"
-                    ]
-                  }
+                  { "required": ["sourceName"] },
+                  { "required": ["applicationName"] }
                 ]
               }
             },
             {
-              "required": [
-                "applicationName"
-              ],
+              "required": ["applicationName"],
               "not": {
                 "anyOf": [
-                  {
-                    "required": [
-                      "sourceName"
-                    ]
-                  },
-                  {
-                    "required": [
-                      "applicationId"
-                    ]
-                  }
+                  { "required": ["sourceName"] },
+                  { "required": ["applicationId"] }
                 ]
               }
             }
@@ -149,15 +134,33 @@
   },
   "examples": [
     {
+      "name": "Get hire date from HR source",
       "type": "accountAttribute",
-      "name": "Account Attribute Transform",
       "attributes": {
         "sourceName": "Corporate HR",
-        "attributeName": "HIREDATE",
+        "attributeName": "HIREDATE"
+      }
+    },
+    {
+      "name": "Get status from newest non-service account",
+      "type": "accountAttribute",
+      "requiresPeriodicRefresh": true,
+      "attributes": {
+        "applicationName": "corp-active-directory",
+        "attributeName": "employeeStatus",
         "accountSortAttribute": "created",
         "accountSortDescending": true,
-        "accountReturnFirstLink": true,
+        "accountReturnFirstLink": false,
+        "accountFilter": "!(nativeIdentity.startsWith(\"*DELETED*\"))",
         "accountPropertyFilter": "(WORKER_STATUS__c == \"active\")"
+      }
+    },
+    {
+      "name": "Get department using immutable source ID",
+      "type": "accountAttribute",
+      "attributes": {
+        "applicationId": "2c91808b7cda982781e0a6b92e0f01a9",
+        "attributeName": "department"
       }
     }
   ]
