@@ -333,6 +333,18 @@ function lintAccountAttribute(attrs: any): LintMessage[] {
 
 function lintConditional(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
+  const RESERVED = new Set(["expression", "positiveCondition", "negativeCondition"]);
+
+  // Helper: extract all $varName references from a string
+  const extractVars = (s: string): string[] =>
+    (s.match(/\$([A-Za-z_][A-Za-z0-9_]*)/g) ?? []).map((v) => v.slice(1));
+
+  // All non-reserved keys in attributes are declared dynamic variables
+  const declaredVars = new Set(
+    Object.keys(attrs ?? {}).filter((k) => !RESERVED.has(k))
+  );
+
+  // --- 1. expression: required, non-empty ---
   const exprRaw = attrs?.expression;
   const expr = String(exprRaw ?? "").trim();
 
@@ -341,34 +353,110 @@ function lintConditional(attrs: any): LintMessage[] {
     return msgs;
   }
 
+  // --- 2. Forbidden operators (using any of these throws IllegalArgumentException at runtime) ---
   const forbidden = /(!=|==|>=|<=|>|<|\bne\b|\bgt\b|\blt\b|\bge\b|\ble\b)/i;
   if (forbidden.test(expr)) {
     push(msgs, "error",
-      `Unsupported operator in expression: '${expr}'. Only 'eq' comparator is supported (e.g., '$var eq value').`,
+      `Unsupported operator in expression '${expr}'. ` +
+      "Only 'eq' is supported — using !=, ==, >, <, ne, gt, lt, ge, le throws IllegalArgumentException at runtime.",
       "attributes.expression"
     );
   }
 
-  if (!/\beq\b/i.test(expr)) {
+  // --- 3. Must contain exactly one 'eq' ---
+  const eqMatches = expr.match(/\beq\b/gi) ?? [];
+  if (eqMatches.length === 0) {
     push(msgs, "error",
-      `Conditional expression must use 'eq' comparator only. Got: '${expr}'.`,
+      `Conditional expression must use the 'eq' comparator: '<ValueA> eq <ValueB>'. Got: '${expr}'.`,
+      "attributes.expression"
+    );
+  } else if (eqMatches.length > 1) {
+    push(msgs, "error",
+      `Expression must contain exactly one 'eq'. Found ${eqMatches.length} occurrences in: '${expr}'. ` +
+      "Nest multiple conditions using separate conditional transforms if needed.",
       "attributes.expression"
     );
   }
 
+  // --- 4. Both sides of 'eq' must be non-empty ---
   const parts = expr.split(/\beq\b/i);
-  if (parts.length !== 2 || parts[0]!.trim().length === 0 || parts[1]!.trim().length === 0) {
+  const valueA = parts[0]?.trim() ?? "";
+  const valueB = parts[1]?.trim() ?? "";
+
+  if (parts.length !== 2 || valueA.length === 0 || valueB.length === 0) {
     push(msgs, "error",
-      `Conditional expression must follow '<ValueA> eq <ValueB>' format. Got: '${expr}'.`,
+      `Expression must follow '<ValueA> eq <ValueB>' with non-empty values on both sides. Got: '${expr}'.`,
       "attributes.expression"
     );
   }
 
-  if (typeof attrs?.positiveCondition !== "string") {
-    push(msgs, "error", "positiveCondition must be a string.", "attributes.positiveCondition");
+  // --- 5. Case-sensitivity info for literal operands ---
+  if (valueA.length > 0 && valueB.length > 0) {
+    const aIsVar = valueA.startsWith("$");
+    const bIsVar = valueB.startsWith("$");
+    if (!aIsVar || !bIsVar) {
+      push(msgs, "info",
+        "Conditional comparisons are case-sensitive. " +
+        `'${!aIsVar ? valueA : valueB}' must match the source value exactly — ` +
+        "'Engineering' and 'engineering' are treated as different values.",
+        "attributes.expression"
+      );
+    }
   }
-  if (typeof attrs?.negativeCondition !== "string") {
-    push(msgs, "error", "negativeCondition must be a string.", "attributes.negativeCondition");
+
+  // --- 6. Cross-check $variable references in expression ---
+  if (valueA.length > 0 && valueB.length > 0) {
+    for (const varName of extractVars(expr)) {
+      if (!declaredVars.has(varName)) {
+        push(msgs, "error",
+          `Expression references '$${varName}' but no matching variable key '${varName}' is declared in attributes. ` +
+          `Add a '${varName}' key to attributes as a static string or nested transform.`,
+          "attributes.expression"
+        );
+      }
+    }
+  }
+
+  // --- 7. positiveCondition: type check + $var cross-check ---
+  const posRaw = attrs?.positiveCondition;
+  if (posRaw !== undefined) {
+    if (typeof posRaw !== "string") {
+      push(msgs, "error",
+        "positiveCondition must be a string — either a static value or a $variableName reference.",
+        "attributes.positiveCondition"
+      );
+    } else {
+      for (const varName of extractVars(posRaw)) {
+        if (!declaredVars.has(varName)) {
+          push(msgs, "error",
+            `positiveCondition references '$${varName}' but no matching variable key '${varName}' is declared in attributes. ` +
+            `Add a '${varName}' key to attributes as a static string or nested transform.`,
+            "attributes.positiveCondition"
+          );
+        }
+      }
+    }
+  }
+
+  // --- 8. negativeCondition: type check + $var cross-check ---
+  const negRaw = attrs?.negativeCondition;
+  if (negRaw !== undefined) {
+    if (typeof negRaw !== "string") {
+      push(msgs, "error",
+        "negativeCondition must be a string — either a static value or a $variableName reference.",
+        "attributes.negativeCondition"
+      );
+    } else {
+      for (const varName of extractVars(negRaw)) {
+        if (!declaredVars.has(varName)) {
+          push(msgs, "error",
+            `negativeCondition references '$${varName}' but no matching variable key '${varName}' is declared in attributes. ` +
+            `Add a '${varName}' key to attributes as a static string or nested transform.`,
+            "attributes.negativeCondition"
+          );
+        }
+      }
+    }
   }
 
   return msgs;

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.conditional.schema.json",
   "title": "SailPoint ISC Transform Schema - conditional",
-  "description": "Strict schema derived from SailPoint official Conditional operation documentation. Allows dynamic variables within attributes as additional properties (per docs). Runtime considerations (not fully enforceable by JSON Schema): operands in expression cannot be null; string comparisons are case-sensitive; expression operator must be 'eq'.",
+  "description": "Strict schema for the SailPoint ISC Conditional transform. Evaluates a 'ValueA eq ValueB' expression and returns positiveCondition (true) or negativeCondition (false). Only 'eq' is supported — other operators throw IllegalArgumentException at runtime. Comparisons are case-sensitive. Operands cannot be null at runtime.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,31 +12,22 @@
   ],
   "properties": {
     "type": {
-      "const": "conditional"
+      "const": "conditional",
+      "description": "Transform operation type. Must be exactly 'conditional'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated every evening as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
-      "description": "Conditional logic configuration, plus optional dynamic variables (per docs).",
-      "additionalProperties": {
-        "description": "Dynamic variables referenced via $variableName. Can be string literals or nested transforms.",
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "$ref": "#/$defs/NestedTransform"
-          }
-        ]
-      },
+      "description": "Conditional logic configuration. Required: expression, positiveCondition, negativeCondition. Optional: dynamic variable keys (any additional key) whose values are static strings or nested transforms, referenced via $variableName in the expression and conditions.",
       "required": [
         "expression",
         "positiveCondition",
@@ -46,26 +37,36 @@
         "expression": {
           "type": "string",
           "minLength": 1,
-          "description": "Comparison statement of the form 'ValueA eq ValueB'. Only 'eq' is valid.",
-          "pattern": "^.*\\beq\\b.*$"
+          "pattern": "^.+\\s+eq\\s+.+$",
+          "description": "Equality expression of the form '<ValueA> eq <ValueB>'. RULES: (1) Only 'eq' operator is supported — !=, ==, >, <, ne, gt, lt etc. throw IllegalArgumentException. (2) Comparisons are case-sensitive: 'Engineering' != 'engineering'. (3) Operands cannot be null at runtime. (4) Variables are referenced with $variableName syntax and must be declared as keys in attributes."
         },
         "positiveCondition": {
           "type": "string",
-          "minLength": 0,
-          "description": "Output when expression evaluates to true. May reference a dynamic variable via $var."
+          "description": "Value returned when expression evaluates to true. Can be a static string (e.g., 'Active') or a $variableName reference to a declared variable in attributes. Can be empty string to return a blank value."
         },
         "negativeCondition": {
           "type": "string",
-          "minLength": 0,
-          "description": "Output when expression evaluates to false. May reference a dynamic variable via $var."
+          "description": "Value returned when expression evaluates to false. Can be a static string (e.g., 'Inactive') or a $variableName reference to a declared variable in attributes. Can be empty string to return a blank value."
         }
+      },
+      "additionalProperties": {
+        "description": "Dynamic variable declaration. Key becomes the variable name, referenced as $keyName in expression, positiveCondition, or negativeCondition. Value must be a static string or a nested transform object.",
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "Static string value for this variable."
+          },
+          {
+            "$ref": "#/$defs/NestedTransform"
+          }
+        ]
       }
     }
   },
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used as a dynamic variable. Docs examples commonly omit 'name' in nested transforms.",
+      "description": "Nested transform object used as a dynamic variable. The 'name' field is optional in nested transforms per SailPoint docs examples.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -73,18 +74,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional transform ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The transform operation type (e.g., 'accountAttribute', 'static', 'dateFormat')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -97,7 +102,7 @@
   "examples": [
     {
       "type": "conditional",
-      "name": "Test Conditional Transform",
+      "name": "Department Science Check",
       "attributes": {
         "expression": "$department eq Science",
         "positiveCondition": "true",
@@ -113,7 +118,7 @@
     },
     {
       "type": "conditional",
-      "name": "Test Conditional Transform (dynamic result)",
+      "name": "Assign Building by Department",
       "attributes": {
         "expression": "$department eq Science",
         "positiveCondition": "$scienceBuilding",
@@ -135,6 +140,25 @@
           "type": "static",
           "attributes": {
             "value": "Building A"
+          }
+        }
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "Active Employee Flag",
+      "requiresPeriodicRefresh": true,
+      "attributes": {
+        "expression": "$workerStatus eq active",
+        "positiveCondition": "true",
+        "negativeCondition": "false",
+        "workerStatus": {
+          "type": "accountAttribute",
+          "attributes": {
+            "applicationName": "corp-hr-system",
+            "attributeName": "WORKER_STATUS__c",
+            "accountSortAttribute": "created",
+            "accountSortDescending": true
           }
         }
       }
