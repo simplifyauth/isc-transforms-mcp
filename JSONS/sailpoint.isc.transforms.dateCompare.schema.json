@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.dateCompare.schema.json",
   "title": "SailPoint ISC Transform Schema - dateCompare",
-  "description": "Strict schema derived from the SailPoint official Date Compare operation documentation. Compares firstDate and secondDate (ISO8601 date-time strings or the keyword 'now', or nested transforms producing those values) using operator LT/LTE/GT/GTE, and returns positiveCondition or negativeCondition.",
+  "description": "Strict schema for the SailPoint ISC Date Compare transform. Compares firstDate against secondDate using the specified operator and returns positiveCondition (true) or negativeCondition (false). Both date operands must be ISO8601 datetime strings, the keyword 'now', or nested transforms whose output is ISO8601.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "dateCompare"
+      "const": "dateCompare",
+      "description": "Transform operation type. Must be exactly 'dateCompare'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. RECOMMENDED when either date operand uses 'now', so time-based comparisons stay current. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -35,47 +37,42 @@
       ],
       "properties": {
         "firstDate": {
-          "$ref": "#/$defs/DateOperand"
+          "$ref": "#/$defs/DateOperand",
+          "description": "Left-hand side of the comparison. Must be an ISO8601 datetime string (with time and timezone), the keyword 'now', or a nested transform whose output is ISO8601."
         },
         "secondDate": {
-          "$ref": "#/$defs/DateOperand"
+          "$ref": "#/$defs/DateOperand",
+          "description": "Right-hand side of the comparison. Must be an ISO8601 datetime string (with time and timezone), the keyword 'now', or a nested transform whose output is ISO8601."
         },
         "operator": {
           "type": "string",
-          "description": "Comparison operator: LT, LTE, GT, GTE (docs list uppercase; examples show lowercase).",
-          "enum": [
-            "LT",
-            "LTE",
-            "GT",
-            "GTE",
-            "lt",
-            "lte",
-            "gt",
-            "gte"
-          ]
+          "description": "Comparison operator (SailPoint docs specify uppercase). LT = firstDate < secondDate, LTE = firstDate ≤ secondDate, GT = firstDate > secondDate, GTE = firstDate ≥ secondDate. Case-insensitive at runtime but uppercase is recommended.",
+          "enum": ["LT", "LTE", "GT", "GTE", "lt", "lte", "gt", "gte"]
         },
         "positiveCondition": {
           "type": "string",
-          "description": "Value to return if the comparison evaluates to true."
+          "description": "String value returned when the comparison evaluates to true. Can be any string (e.g., 'active', 'true', 'legacy'). Cannot be null."
         },
         "negativeCondition": {
           "type": "string",
-          "description": "Value to return if the comparison evaluates to false."
+          "description": "String value returned when the comparison evaluates to false. Can be any string (e.g., 'inactive', 'false', 'regular'). Cannot be null."
         }
       }
     }
   },
   "$defs": {
     "DateOperand": {
-      "description": "A date operand: ISO8601 date-time string, the keyword 'now', or a nested transform returning an ISO8601 value.",
+      "description": "A date operand: the keyword 'now' (evaluated at runtime), a full ISO8601 datetime string (must include time and timezone), or a nested transform object whose output is an ISO8601 datetime string.",
       "oneOf": [
         {
           "type": "string",
-          "const": "now"
+          "const": "now",
+          "description": "The special keyword 'now', evaluated to the current datetime at transform execution. Must be lowercase."
         },
         {
           "type": "string",
-          "format": "date-time"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?(Z|[+-]\\d{2}:\\d{2})$",
+          "description": "ISO8601 datetime string with time and timezone. Examples: '2025-01-15T00:00:00Z', '1995-12-31T00:00:00-05:00'."
         },
         {
           "$ref": "#/$defs/NestedTransform"
@@ -84,7 +81,7 @@
     },
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object. In SailPoint docs, nested transforms commonly omit 'name'. Operation-specific validation should be applied by the nested transform's own schema.",
+      "description": "A nested transform object that produces a date value. The output must be an ISO8601 datetime string. Use a dateFormat transform with outputFormat: 'ISO8601' if the source attribute is not already in ISO8601 format. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -92,18 +89,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'dateFormat', 'dateMath')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -115,8 +116,9 @@
   },
   "examples": [
     {
+      "name": "Is Termination Date in the Future",
       "type": "dateCompare",
-      "name": "Date Compare Transform",
+      "requiresPeriodicRefresh": true,
       "attributes": {
         "firstDate": {
           "type": "accountAttribute",
@@ -126,14 +128,14 @@
           }
         },
         "secondDate": "now",
-        "operator": "gt",
+        "operator": "GT",
         "positiveCondition": "active",
         "negativeCondition": "terminated"
       }
     },
     {
+      "name": "Legacy vs Regular Employee Cutover",
       "type": "dateCompare",
-      "name": "Date Compare Transform (Legacy Cutover)",
       "attributes": {
         "firstDate": {
           "type": "accountAttribute",
@@ -150,9 +152,27 @@
             "outputFormat": "ISO8601"
           }
         },
-        "operator": "lte",
+        "operator": "LTE",
         "positiveCondition": "legacy",
         "negativeCondition": "regular"
+      }
+    },
+    {
+      "name": "Hire Date Before Cutover Check",
+      "type": "dateCompare",
+      "requiresPeriodicRefresh": false,
+      "attributes": {
+        "firstDate": "2020-01-01T00:00:00Z",
+        "secondDate": {
+          "type": "accountAttribute",
+          "attributes": {
+            "applicationName": "corp-hr-system",
+            "attributeName": "HIREDATE"
+          }
+        },
+        "operator": "LT",
+        "positiveCondition": "pre-2020",
+        "negativeCondition": "post-2020"
       }
     }
   ]

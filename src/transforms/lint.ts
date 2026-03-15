@@ -29,7 +29,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   base64Encode:   new Set(["input"]),
   concat:         new Set(["values", "input"]),
   conditional:    "open",     // dynamic variable keys allowed per docs
-  dateCompare:    new Set(["firstDate", "secondDate", "operator", "positiveCondition", "negativeCondition", "input"]),
+  dateCompare:    new Set(["firstDate", "secondDate", "operator", "positiveCondition", "negativeCondition"]),
   dateFormat:     new Set(["input", "inputFormat", "outputFormat"]),
   dateMath:       new Set(["expression", "input", "roundUp"]),
   decomposeDiacriticalMarks: new Set(["input"]),
@@ -644,6 +644,7 @@ function lintDateCompare(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
   const ISO8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
   const isNestedTransform = (v: any): boolean => !!(v && typeof v === "object" && typeof v.type === "string");
+  let usesNow = false;
 
   const checkDateOperand = (field: "firstDate" | "secondDate") => {
     const v = attrs?.[field];
@@ -653,41 +654,123 @@ function lintDateCompare(attrs: any): LintMessage[] {
     }
     if (typeof v === "string") {
       const t = v.trim();
-      if (t.toLowerCase() === "now") return;
+      // "now" keyword — SailPoint docs show lowercase; warn if casing differs
+      if (t.toLowerCase() === "now") {
+        usesNow = true;
+        if (t !== "now") {
+          push(msgs, "warn",
+            `${field} value '${t}' should be the lowercase keyword 'now'. ISC evaluates it case-sensitively.`,
+            `attributes.${field}`
+          );
+        }
+        return;
+      }
+      // Must be a full ISO8601 datetime with time and timezone
       if (!ISO8601_RE.test(t)) {
         push(msgs, "error",
-          `${field} must be an ISO8601 datetime (e.g., 2025-01-01T00:00:00Z), 'now', or a nested transform.`,
+          `${field} string '${t}' is not valid. Must be an ISO8601 datetime with time and timezone ` +
+          "(e.g., '2025-01-15T00:00:00Z' or '2025-01-15T00:00:00+05:30'), the keyword 'now', or a nested transform object.",
           `attributes.${field}`
         );
       }
       return;
     }
-    if (isNestedTransform(v)) return;
-    push(msgs, "error", `${field} must be a string (ISO8601/'now') or a nested transform object.`, `attributes.${field}`);
+    if (isNestedTransform(v)) {
+      // Nested transforms must ultimately output an ISO8601 string for the comparison to work
+      push(msgs, "info",
+        `${field} uses a nested '${v.type}' transform. Ensure its output is an ISO8601 datetime string. ` +
+        "If the source attribute is not ISO8601, wrap it with a dateFormat transform using outputFormat: 'ISO8601'.",
+        `attributes.${field}`
+      );
+      return;
+    }
+    push(msgs, "error",
+      `${field} must be an ISO8601 datetime string, the keyword 'now', or a nested transform object with a 'type' field.`,
+      `attributes.${field}`
+    );
   };
 
   checkDateOperand("firstDate");
   checkDateOperand("secondDate");
 
+  // --- operator: required, LT / LTE / GT / GTE ---
+  const VALID_OPS = new Set(["LT", "LTE", "GT", "GTE"]);
+  const OP_SEMANTICS: Record<string, string> = {
+    LT:  "firstDate < secondDate",
+    LTE: "firstDate ≤ secondDate",
+    GT:  "firstDate > secondDate",
+    GTE: "firstDate ≥ secondDate",
+  };
+
   const op = attrs?.operator;
   if (!op || String(op).trim() === "") {
-    push(msgs, "error", "operator is required.", "attributes.operator");
+    push(msgs, "error",
+      "operator is required. Must be one of: LT (less than), LTE (less than or equal), GT (greater than), GTE (greater than or equal).",
+      "attributes.operator"
+    );
   } else {
-    const v = String(op).trim().toUpperCase();
-    if (!new Set(["LT", "LTE", "GT", "GTE"]).has(v)) {
-      push(msgs, "error", "operator must be one of: LT, LTE, GT, GTE (case-insensitive).", "attributes.operator");
+    const opUpper = String(op).trim().toUpperCase();
+    if (!VALID_OPS.has(opUpper)) {
+      push(msgs, "error",
+        `operator '${op}' is not valid. Allowed values: LT, LTE, GT, GTE (case-insensitive). ` +
+        "LT = firstDate < secondDate, LTE = ≤, GT = >, GTE = ≥.",
+        "attributes.operator"
+      );
+    } else {
+      if (op !== opUpper) {
+        push(msgs, "warn",
+          `operator '${op}' is accepted but SailPoint docs specify uppercase. Use '${opUpper}' for consistency.`,
+          "attributes.operator"
+        );
+      }
+      push(msgs, "info",
+        `operator '${opUpper}': ${OP_SEMANTICS[opUpper]}. ` +
+        "Returns positiveCondition when true, negativeCondition when false.",
+        "attributes.operator"
+      );
     }
   }
 
+  // --- positiveCondition: required string ---
   if (attrs?.positiveCondition === undefined || attrs.positiveCondition === null) {
-    push(msgs, "error", "positiveCondition is required for dateCompare.", "attributes.positiveCondition");
+    push(msgs, "error",
+      "positiveCondition is required — the string value returned when the date comparison evaluates to true.",
+      "attributes.positiveCondition"
+    );
   } else if (typeof attrs.positiveCondition !== "string") {
     push(msgs, "error", "positiveCondition must be a string.", "attributes.positiveCondition");
   }
+
+  // --- negativeCondition: required string ---
   if (attrs?.negativeCondition === undefined || attrs.negativeCondition === null) {
-    push(msgs, "error", "negativeCondition is required for dateCompare.", "attributes.negativeCondition");
+    push(msgs, "error",
+      "negativeCondition is required — the string value returned when the date comparison evaluates to false.",
+      "attributes.negativeCondition"
+    );
   } else if (typeof attrs.negativeCondition !== "string") {
     push(msgs, "error", "negativeCondition must be a string.", "attributes.negativeCondition");
+  }
+
+  // --- Warn if positiveCondition === negativeCondition (comparison has no effect) ---
+  if (
+    typeof attrs?.positiveCondition === "string" &&
+    typeof attrs?.negativeCondition === "string" &&
+    attrs.positiveCondition === attrs.negativeCondition
+  ) {
+    push(msgs, "warn",
+      `positiveCondition and negativeCondition are both '${attrs.positiveCondition}'. ` +
+      "The comparison result has no effect since both branches return the same value.",
+      "attributes"
+    );
+  }
+
+  // --- Recommend requiresPeriodicRefresh when 'now' is used ---
+  if (usesNow) {
+    push(msgs, "info",
+      "One or both date operands use 'now'. Set requiresPeriodicRefresh: true at the transform root level " +
+      "so the comparison re-evaluates during nightly identity refresh — otherwise results may become stale for active identities.",
+      "attributes"
+    );
   }
 
   return msgs;
