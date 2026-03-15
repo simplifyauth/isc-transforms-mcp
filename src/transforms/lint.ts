@@ -1442,7 +1442,57 @@ function lintStatic(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 25. indexOf / lastIndexOf
+// 25. identityAttribute — name format + critical use-case limitation
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/identity-attribute
+// ---------------------------------------------------------------------------
+
+function lintIdentityAttribute(attrs: any): LintMessage[] {
+  const msgs: LintMessage[] = [];
+
+  // 1. name: must be a camelCase system name — no spaces, ideally no hyphens
+  const name = attrs?.name;
+  if (typeof name === "string" && name.trim().length > 0) {
+    if (/\s/.test(name)) {
+      push(msgs, "error",
+        `attributes.name '${name}' contains whitespace. Identity attribute system names are camelCase with no spaces ` +
+        "(e.g., 'uid', 'email', 'identificationNumber'). Check the identity profile attribute's system name in the Admin UI.",
+        "attributes.name"
+      );
+    } else if (/-/.test(name)) {
+      push(msgs, "warn",
+        `attributes.name '${name}' contains a hyphen. Identity attribute system names are camelCase ` +
+        "(e.g., 'identificationNumber', not 'identification-number'). Verify this is the exact system name shown in the Admin UI.",
+        "attributes.name"
+      );
+    }
+  }
+
+  // 2. Critical use-case limitation — identityAttribute is NOT safe inside identity profile attribute calculations
+  push(msgs, "warn",
+    "identityAttribute is NOT intended for use within another identity profile attribute's calculation. " +
+    "Due to multi-threaded identity processing, the referenced attribute may not yet exist or may hold stale data at evaluation time. " +
+    "Intended use: provisioning policies and entitlement request forms. " +
+    "If you need an account attribute value inside an identity profile mapping, use accountAttribute instead.",
+    "type"
+  );
+
+  // 3. input: must be a nested transform object if provided
+  if (attrs?.input !== undefined) {
+    const inp = attrs.input;
+    if (!(isPlainObject(inp) && typeof (inp as any).type === "string")) {
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} providing explicit input data. " +
+        "If omitted, the transform uses the source+attribute combination configured in the identity profile UI.",
+        "attributes.input"
+      );
+    }
+  }
+
+  return msgs;
+}
+
+// ---------------------------------------------------------------------------
+// 27. indexOf / lastIndexOf
 // ---------------------------------------------------------------------------
 
 function lintIndexOf(t: string, attrs: any): LintMessage[] {
@@ -1457,7 +1507,7 @@ function lintIndexOf(t: string, attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 26. randomAlphaNumeric / randomNumeric — length
+// 28. randomAlphaNumeric / randomNumeric — length
 // ---------------------------------------------------------------------------
 
 function lintRandom(t: string, attrs: any): LintMessage[] {
@@ -1474,7 +1524,7 @@ function lintRandom(t: string, attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 27. rfc5646 — format type check
+// 29. rfc5646 — format type check
 // ---------------------------------------------------------------------------
 
 function lintRfc5646(attrs: any): LintMessage[] {
@@ -1558,6 +1608,7 @@ export function lintTransform(input: any): { normalized: any; messages: LintMess
   if (requestedType === "leftPad" || requestedType === "rightPad") messages.push(...lintPad(attrs));
   if (requestedType === "substring")                    messages.push(...lintSubstring(attrs));
   if (requestedType === "static")                       messages.push(...lintStatic(attrs));
+  if (requestedType === "identityAttribute")            messages.push(...lintIdentityAttribute(attrs));
   if (requestedType === "indexOf" || requestedType === "lastIndexOf") messages.push(...lintIndexOf(requestedType, attrs));
   if (requestedType === "randomAlphaNumeric" || requestedType === "randomNumeric") messages.push(...lintRandom(requestedType, attrs));
   if (requestedType === "rfc5646")                      messages.push(...lintRfc5646(attrs));
