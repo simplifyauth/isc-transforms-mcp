@@ -58,7 +58,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   substring:      new Set(["begin", "beginOffset", "end", "endOffset", "input"]),
   trim:           new Set(["input"]),
   upper:          new Set(["input"]),
-  usernameGenerator: new Set(["patterns", "sourceCheck"]),
+  usernameGenerator: "open",   // patterns + sourceCheck + cloudMaxSize/Checks/Required + dynamic variable keys (fn, ln, etc.)
   uuid:           new Set([]),
   // Rule-backed ops (normalized to type=rule, but linted by operation key)
   generateRandomString:          new Set(["name", "operation", "length", "includeNumbers", "includeSpecialChars"]),
@@ -1209,30 +1209,181 @@ function lintDateFormat(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 12. usernameGenerator — patterns array
+// 12. usernameGenerator — patterns, tokens, cloud* fields, dynamic variable cross-check
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/username-generator
 // ---------------------------------------------------------------------------
+
+// Known non-variable attribute keys for usernameGenerator
+const USERNAME_GENERATOR_KNOWN_KEYS = new Set([
+  "patterns", "sourceCheck", "cloudMaxSize", "cloudMaxUniqueChecks", "cloudRequired",
+]);
 
 function lintUsernameGenerator(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
   const patterns = attrs?.patterns;
+
+  // --- 1. patterns: required non-empty array of format strings ---
   if (patterns !== undefined) {
     if (!Array.isArray(patterns) || patterns.length === 0) {
-      push(msgs, "error", "patterns must be a non-empty array of strings.", "attributes.patterns");
+      push(msgs, "error",
+        "patterns must be a non-empty array of format strings (e.g., ['$fn$ln', '$fn.$ln${uniqueCounter}']).",
+        "attributes.patterns"
+      );
     } else {
-      const bad = patterns.findIndex((p) => typeof p !== "string" || p.trim().length === 0);
-      if (bad >= 0) {
-        push(msgs, "error", `Each pattern must be a non-empty string. Invalid at index [${bad}].`, `attributes.patterns[${bad}]`);
+      // 1a. Each entry must be a non-empty string
+      patterns.forEach((p: any, idx: number) => {
+        if (typeof p !== "string" || p.trim().length === 0) {
+          push(msgs, "error",
+            `patterns[${idx}] must be a non-empty format string. ` +
+            "Use $varName or ${varName} tokens for variable substitution.",
+            `attributes.patterns[${idx}]`
+          );
+        }
+      });
+
+      // 1b. ${uniqueCounter} must be last — patterns after it are never evaluated
+      const ucIdx = patterns.findIndex(
+        (p: any) => typeof p === "string" && p.includes("uniqueCounter")
+      );
+      if (ucIdx >= 0 && ucIdx !== patterns.length - 1) {
+        push(msgs, "error",
+          "The pattern containing '${uniqueCounter}' must be the last entry in the patterns array. " +
+          "The generator stops after exhausting the uniqueCounter pattern — any patterns listed after it are never evaluated.",
+          "attributes.patterns"
+        );
       }
-      // uniqueCounter must be last per docs
-      const idx = patterns.findIndex((p) => typeof p === "string" && p.includes("uniqueCounter"));
-      if (idx >= 0 && idx !== patterns.length - 1) {
-        push(msgs, "warn", "Pattern containing 'uniqueCounter' should be last in the patterns array.", "attributes.patterns");
+
+      // 1c. No uniqueCounter at all — exhausting all patterns throws IllegalStateException
+      if (ucIdx === -1) {
+        push(msgs, "warn",
+          "No pattern contains '${uniqueCounter}'. If all patterns generate values that already exist, " +
+          "the generator throws an IllegalStateException. " +
+          "Add a final fallback pattern with '${uniqueCounter}' (e.g., '$fn$ln${uniqueCounter}') to handle conflicts.",
+          "attributes.patterns"
+        );
+      }
+
+      // 1d. Token syntax info
+      push(msgs, "info",
+        "Pattern tokens use dollar-sign notation: $varName (simple) or ${varName} (formal). " +
+        "Each variable name (e.g., $fn, $ln, $fi) must be defined as an additional key in the attributes object, " +
+        "set to a static string or a nested transform that supplies the value. " +
+        "The reserved token ${uniqueCounter} auto-increments when a generated value already exists.",
+        "attributes.patterns"
+      );
+
+      // 1e. Cross-check: tokens used in patterns must have a matching variable defined in attributes
+      const RESERVED_TOKENS = new Set(["uniqueCounter"]);
+      const definedVars = new Set(
+        Object.keys(attrs ?? {}).filter((k) => !USERNAME_GENERATOR_KNOWN_KEYS.has(k))
+      );
+      const referencedTokens = new Set<string>();
+      for (const p of patterns) {
+        if (typeof p !== "string") continue;
+        const re = /\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(p)) !== null) {
+          referencedTokens.add(m[1]!);
+        }
+      }
+      for (const tok of referencedTokens) {
+        if (RESERVED_TOKENS.has(tok)) continue;
+        if (!definedVars.has(tok)) {
+          push(msgs, "warn",
+            `Pattern references '$${tok}' but no variable '${tok}' is defined in attributes. ` +
+            `Add a '${tok}' key to attributes as a static string or a nested transform (e.g., identityAttribute).`,
+            `attributes.${tok}`
+          );
+        }
+      }
+
+      // 1f. Cross-check: variables defined in attributes but never referenced in any pattern
+      for (const varName of definedVars) {
+        if (!referencedTokens.has(varName)) {
+          push(msgs, "warn",
+            `Variable '${varName}' is defined in attributes but not referenced as $${varName} in any pattern. ` +
+            "Remove it to keep the transform clean, or check for a typo in the pattern.",
+            `attributes.${varName}`
+          );
+        }
       }
     }
   }
-  if (attrs?.sourceCheck !== undefined && typeof attrs.sourceCheck !== "boolean") {
-    push(msgs, "error", "sourceCheck must be a boolean.", "attributes.sourceCheck");
+
+  // --- 2. sourceCheck ---
+  if (attrs?.sourceCheck !== undefined) {
+    if (typeof attrs.sourceCheck !== "boolean") {
+      push(msgs, "error",
+        "sourceCheck must be a boolean. " +
+        "true = check the target system directly (only if the source supports getObject). " +
+        "false = check only the ISC database (default).",
+        "attributes.sourceCheck"
+      );
+    } else if (attrs.sourceCheck === true) {
+      push(msgs, "info",
+        "sourceCheck: true validates uniqueness against the target system directly. " +
+        "This only works for sources that support the getObject operation — " +
+        "for sources that don't, the check automatically falls back to the ISC database.",
+        "attributes.sourceCheck"
+      );
+    }
   }
+
+  // --- 3. cloudMaxSize: positive integer — truncates generated values exceeding this length ---
+  if (attrs?.cloudMaxSize !== undefined) {
+    const n = Number(attrs.cloudMaxSize);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      push(msgs, "error",
+        "cloudMaxSize must be a positive integer. Generated usernames longer than this value will be truncated to this length.",
+        "attributes.cloudMaxSize"
+      );
+    } else {
+      push(msgs, "info",
+        `cloudMaxSize: ${n} — generated values exceeding ${n} characters will be automatically truncated.`,
+        "attributes.cloudMaxSize"
+      );
+    }
+  }
+
+  // --- 4. cloudMaxUniqueChecks: positive integer, maximum 50 ---
+  if (attrs?.cloudMaxUniqueChecks !== undefined) {
+    const n = Number(attrs.cloudMaxUniqueChecks);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      push(msgs, "error",
+        "cloudMaxUniqueChecks must be a positive integer (maximum: 50). " +
+        "The generator throws IllegalStateException when this number of uniqueness iterations is exceeded.",
+        "attributes.cloudMaxUniqueChecks"
+      );
+    } else if (n > 50) {
+      push(msgs, "error",
+        `cloudMaxUniqueChecks ${n} exceeds the documented maximum of 50. ` +
+        "Values above 50 cause an error at runtime. Set to 50 or less.",
+        "attributes.cloudMaxUniqueChecks"
+      );
+    } else {
+      push(msgs, "info",
+        `cloudMaxUniqueChecks: ${n} — generator throws IllegalStateException after ${n} failed uniqueness iterations.`,
+        "attributes.cloudMaxUniqueChecks"
+      );
+    }
+  }
+
+  // --- 5. cloudRequired: internal flag — must remain true ---
+  if (attrs?.cloudRequired !== undefined && attrs.cloudRequired !== true) {
+    push(msgs, "warn",
+      "cloudRequired is an internal flag that must remain true. " +
+      "Setting it to any other value may cause unexpected behavior.",
+      "attributes.cloudRequired"
+    );
+  }
+
+  // --- 6. Standalone use limitation ---
+  push(msgs, "info",
+    "usernameGenerator is designed specifically for account create profiles. " +
+    "It should be placed within a create profile attribute definition — not used as a standalone identity profile attribute transform.",
+    "type"
+  );
+
   return msgs;
 }
 

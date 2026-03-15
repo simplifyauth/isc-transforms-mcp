@@ -1,6 +1,6 @@
 {
   "name": "isc-transforms-mcp",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "type": "module",
   "description": "MCP server for SailPoint Identity Security Cloud (ISC) Transform authoring — scaffold, strict lint, catalog, and safe upsert to live tenants.",
   "author": {
