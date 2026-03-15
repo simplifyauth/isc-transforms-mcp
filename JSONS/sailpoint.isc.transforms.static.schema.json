@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.static.schema.json",
   "title": "SailPoint ISC Transform Schema - static",
-  "description": "Strict schema derived from SailPoint official Static operation documentation. Returns a fixed string value. Docs also allow Velocity Template Language (VTL) in the value, and allow dynamic variables in attributes to be referenced within the VTL.",
+  "description": "Strict schema for the SailPoint ISC Static transform. Returns a fixed string value or evaluates a Velocity Template Language (VTL) expression. The 'value' attribute holds either a literal string (e.g. 'Contractor') or a VTL template (e.g. \"#if($workerType=='Employee')Full-Time#{else}Contingent#end\"). Additional sibling keys in the attributes object are dynamic VTL variables — each can be a static string or a nested transform whose output feeds the VTL expression. IMPORTANT: Attribute ordering matters — all dynamic variable attributes must be evaluated before the value expression runs. Reference variables using $varName or ${varName} (formal reference) or $!varName / $!{varName} (quiet reference, suppresses null output).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,34 +12,37 @@
   ],
   "properties": {
     "type": {
-      "const": "static"
+      "const": "static",
+      "description": "Transform operation type. Must be exactly 'static'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Set to true if the VTL expression uses dynamic variables that may change over time. Default is false."
     },
     "attributes": {
       "type": "object",
-      "description": "Static value plus optional dynamic variables (per docs).",
+      "description": "Required container. Must include 'value' (the fixed string or VTL expression). Any additional keys are dynamic VTL variables — each key name maps to a static string or a nested transform. Use $keyName or ${keyName} in value to reference them. Attribute ordering in the identity profile matters: all variable attributes must be placed before the static transform.",
       "required": [
         "value"
       ],
       "properties": {
         "value": {
           "type": "string",
-          "description": "Static string value or Velocity template."
+          "description": "The output of this transform. Either a fixed string literal (e.g. 'Contractor') or a VTL expression referencing dynamic variables defined as sibling keys in attributes (e.g. \"#if($workerType=='Employee')Full-Time#{else}Contingent#end\" or \"$first.$last@example.com\"). Supports: $varName (simple), ${varName} (formal), $!varName (quiet — outputs empty string if null), $!{varName} (quiet formal). VTL conditionals: #if($var=='value')result#{else}alternative#end."
         }
       },
       "additionalProperties": {
-        "description": "Dynamic variables referenced in Velocity template. Can be string literals or nested transforms.",
+        "description": "Dynamic VTL variable. The key becomes the variable name referenced as $keyName in value. The value can be a static string (e.g. 'HR') or a nested transform object (e.g. accountAttribute, identityAttribute) whose output feeds the VTL expression.",
         "anyOf": [
           {
-            "type": "string"
+            "type": "string",
+            "description": "Static string value for this VTL variable."
           },
           {
             "$ref": "#/$defs/NestedTransform"
@@ -51,50 +54,52 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used as a dynamic variable. Docs examples often omit 'name'.",
+      "description": "A nested transform object used as a dynamic VTL variable value. The output of this nested transform is substituted for the variable reference in value. Common types: accountAttribute, identityAttribute, getReferenceIdentityAttribute. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
-        "type"
+        "type",
+        "attributes"
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'getReferenceIdentityAttribute')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
-          "type": [
-            "object",
-            "null"
-          ],
+          "type": "object",
           "additionalProperties": true,
-          "description": "Operation-specific attributes for the nested transform (may be omitted for operations without attributes)."
+          "description": "Operation-specific attributes for the nested transform."
         }
       }
     }
   },
   "examples": [
     {
+      "name": "Fixed String",
       "type": "static",
-      "name": "Static Transform",
       "attributes": {
         "value": "Contractor"
       }
     },
     {
+      "name": "Email From Identity Attributes",
       "type": "static",
-      "name": "Static Transform (Template)",
       "attributes": {
-        "value": "${first}.${last}@example.com",
+        "value": "$first.$last@example.com",
         "first": {
           "type": "identityAttribute",
           "attributes": {
@@ -105,6 +110,36 @@
           "type": "identityAttribute",
           "attributes": {
             "name": "familyName"
+          }
+        }
+      }
+    },
+    {
+      "name": "Worker Type Conditional",
+      "type": "static",
+      "attributes": {
+        "value": "#if($workerType=='Employee')Full-Time#{else}Contingent#end",
+        "workerType": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "workerType"
+          }
+        }
+      }
+    },
+    {
+      "name": "Manager Email Quiet Reference",
+      "type": "static",
+      "attributes": {
+        "value": "$!{managerEmail}",
+        "managerEmail": {
+          "type": "getReferenceIdentityAttribute",
+          "attributes": {
+            "name": "Cloud Services Deployment Utility",
+            "operation": "getReferenceIdentityAttribute",
+            "uid": "manager",
+            "attributeName": "email"
           }
         }
       }

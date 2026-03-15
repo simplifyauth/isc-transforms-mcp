@@ -1366,17 +1366,78 @@ function lintSubstring(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 24. static — value must be a string
+// 24. static — value (fixed string or VTL), dynamic VTL variable cross-check
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/static
 // ---------------------------------------------------------------------------
 
 function lintStatic(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
-  // Presence check is handled by checkRequired (spec.requiredAttributes).
-  // Here we only validate the type when value is present.
+
+  // 1. value type check — must be a string (fixed literal or VTL expression)
   if (attrs?.value !== undefined && attrs?.value !== null && typeof attrs.value !== "string") {
-    push(msgs, "error", "value must be a string.", "attributes.value");
+    push(msgs, "error",
+      "value must be a string — either a fixed literal (e.g. 'Contractor') or a VTL expression " +
+      "(e.g. \"#if($workerType=='Employee')Full-Time#{else}Contingent#end\").",
+      "attributes.value"
+    );
+    return msgs; // cannot do VTL analysis without a string value
   }
-  // Any other keys in attributes are valid dynamic VTL variable definitions — no unknown-attribute errors.
+
+  const value: string | undefined = attrs?.value;
+
+  // 2. Empty value warning
+  if (typeof value === "string" && value.trim() === "") {
+    push(msgs, "warn",
+      "value is an empty string — this will produce an empty (null-equivalent) attribute. " +
+      "Provide a non-empty fixed string or VTL expression.",
+      "attributes.value"
+    );
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    // 3. Extract VTL variable references ($varName, ${varName}, $!varName, $!{varName})
+    const vtlRefs = new Set<string>();
+    const refPattern = /\$!?\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g;
+    let m: RegExpExecArray | null;
+    while ((m = refPattern.exec(value)) !== null) {
+      vtlRefs.add(m[1]);
+    }
+
+    if (vtlRefs.size > 0) {
+      // 4. Warn for each VTL reference that has no matching dynamic variable in attributes
+      for (const varName of vtlRefs) {
+        if (!Object.prototype.hasOwnProperty.call(attrs, varName)) {
+          push(msgs, "warn",
+            `VTL references $${varName} in value but no dynamic variable '${varName}' is defined in attributes. ` +
+            `Add a '${varName}' key to attributes with a static string or nested transform that supplies the value.`,
+            `attributes.${varName}`
+          );
+        }
+      }
+
+      // 5. Ordering hint — VTL variables must be positioned before the value attribute in the identity profile
+      push(msgs, "info",
+        "VTL variables detected in value. Attribute ordering matters in identity profiles: " +
+        "all dynamic variable attributes must be mapped and evaluated before the static transform's value expression runs. " +
+        "Review the attribute mapping order in your identity profile.",
+        "attributes.value"
+      );
+    }
+
+    // 6. Warn for dynamic variables defined in attributes but never referenced in value (likely a typo or leftover)
+    const reservedKeys = new Set(["value"]);
+    for (const key of Object.keys(attrs ?? {})) {
+      if (reservedKeys.has(key)) continue;
+      if (!vtlRefs.has(key)) {
+        push(msgs, "warn",
+          `Dynamic variable '${key}' is defined in attributes but not referenced as $${key} in value. ` +
+          `If intentional, remove it to keep the transform clean; otherwise check for a typo.`,
+          `attributes.${key}`
+        );
+      }
+    }
+  }
+
   return msgs;
 }
 
