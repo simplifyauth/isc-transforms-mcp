@@ -27,7 +27,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   ]),
   base64Decode:   new Set(["input"]),
   base64Encode:   new Set(["input"]),
-  concat:         new Set(["values", "input"]),
+  concat:         new Set(["values"]),
   conditional:    "open",     // dynamic variable keys allowed per docs
   dateCompare:    new Set(["firstDate", "secondDate", "operator", "positiveCondition", "negativeCondition"]),
   dateFormat:     new Set(["input", "inputFormat", "outputFormat"]),
@@ -1970,6 +1970,90 @@ function lintRfc5646(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
+// lintConcat — concat (Concatenation)
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/concatenation
+// Joins an ordered array of strings / nested-transform outputs into one string.
+// No automatic separators — spaces, hyphens, etc. must be explicit array entries.
+// ---------------------------------------------------------------------------
+function lintConcat(attrs: any): LintMessage[] {
+  const msgs: LintMessage[] = [];
+  const values = attrs?.values;
+
+  // --- 1. values is the only attribute and is required ---
+  if (values === undefined || values === null) {
+    push(msgs, "error",
+      "values is required for concat. Provide an ordered array of strings and/or nested transform objects " +
+      "whose outputs will be joined into a single string.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+  if (!Array.isArray(values)) {
+    push(msgs, "error",
+      "values must be an array of strings and/or nested transform objects.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+  if (values.length === 0) {
+    push(msgs, "error",
+      "values array must not be empty. Provide at least one string or nested transform.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+
+  // --- 2. Warn if only a single entry — concat is pointless with one value ---
+  if (values.length === 1) {
+    push(msgs, "warn",
+      "values array has only one entry. concat is designed to join multiple values — " +
+      "consider using the nested transform directly instead of wrapping it in a concat.",
+      "attributes.values"
+    );
+  }
+
+  // --- 3. Validate each item: must be string or a nested transform object ---
+  values.forEach((item: any, idx: number) => {
+    if (item === null || item === undefined) {
+      push(msgs, "warn",
+        `values[${idx}] is null/undefined — this will produce the string "null"/"undefined" in the output. ` +
+        "Remove it or replace with a static string or a nested transform.",
+        `attributes.values[${idx}]`
+      );
+    } else if (typeof item === "string") {
+      // Valid — static strings (including spaces, separators, literals) are expected
+    } else if (isPlainObject(item)) {
+      if (typeof (item as any).type !== "string" || (item as any).type.trim() === "") {
+        push(msgs, "error",
+          `values[${idx}] is an object but is missing a 'type' field — it does not look like a valid nested transform. ` +
+          "Add a 'type' (e.g., 'accountAttribute', 'identityAttribute', 'static').",
+          `attributes.values[${idx}]`
+        );
+      }
+    } else {
+      push(msgs, "error",
+        `values[${idx}] must be a string or a nested transform object {type, attributes}. ` +
+        `Got: ${typeof item}.`,
+        `attributes.values[${idx}]`
+      );
+    }
+  });
+
+  // --- 4. Separator hint: inform if no explicit spacing string found between transform objects ---
+  const allTransforms = values.every((v: any) => isPlainObject(v));
+  if (allTransforms && values.length > 1) {
+    push(msgs, "info",
+      "concat does not insert any separator between values automatically. " +
+      "If the output needs spaces, hyphens, or other delimiters, add them as explicit string entries " +
+      "in the values array (e.g., [firstName, \" \", lastName]).",
+      "attributes.values"
+    );
+  }
+
+  return msgs;
+}
+
+// ---------------------------------------------------------------------------
 // Main lintTransform export
 // ---------------------------------------------------------------------------
 
@@ -2046,6 +2130,7 @@ export function lintTransform(input: any): { normalized: any; messages: LintMess
   if (requestedType === "indexOf" || requestedType === "lastIndexOf") messages.push(...lintIndexOf(requestedType, attrs));
   if (requestedType === "randomAlphaNumeric" || requestedType === "randomNumeric") messages.push(...lintRandom(requestedType, attrs));
   if (requestedType === "rfc5646")                      messages.push(...lintRfc5646(attrs));
+  if (requestedType === "concat")                       messages.push(...lintConcat(attrs));
 
   // --- Recursive nested transform lint ---
   // Recursively lint every nested transform found inside attributes.

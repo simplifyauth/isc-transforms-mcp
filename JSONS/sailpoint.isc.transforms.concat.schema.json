@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.concat.schema.json",
   "title": "SailPoint ISC Transform Schema - concat",
-  "description": "Strict schema derived from the SailPoint official Concatenation operation documentation. Concatenates an array of values (static strings or nested transform objects) into a single string output.",
+  "description": "Strict schema for the SailPoint ISC concat (Concatenation) transform. Joins an ordered array of values (static strings or nested transform outputs) into a single combined string. Key behaviors: (1) Items are joined in order with NO automatic separator — spaces, hyphens, or other delimiters must be added as explicit string entries in the array. (2) Each array entry can be a static string literal or a nested transform object whose output string is used. (3) A single-entry values array is valid JSON but semantically pointless — use the nested transform directly in that case.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "concat"
+      "const": "concat",
+      "description": "Transform operation type. Must be exactly 'concat'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -29,15 +31,17 @@
       "required": [
         "values"
       ],
+      "description": "Required container for concat operation attributes. The only valid attribute is 'values'.",
       "properties": {
         "values": {
           "type": "array",
-          "minItems": 2,
-          "description": "Array of items to join. Each item must be a static string or a nested transform object.",
+          "minItems": 1,
+          "description": "Required. Ordered array of items to join into a single output string. Items are concatenated in sequence with no automatic separator. Rules: (1) Each entry must be a static string literal or a nested transform object {type, attributes} whose output is used. (2) To include spaces, hyphens, or any other separator, add them as explicit string entries between the value entries. (3) A single-entry array is valid but pointless — the nested transform can be used directly. Examples: [firstName, ' ', lastName] → 'Jane Doe'; [jobTitle, ' - ', jobCode] → 'Engineer - ENG001'.",
           "items": {
-            "oneOf": [
+            "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "description": "Static string literal included as-is in the output (e.g., ' ', ' - ', ' (Contractor)')."
               },
               {
                 "$ref": "#/$defs/NestedTransform"
@@ -51,7 +55,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used inside other transforms (docs examples often omit 'name' on nested transforms). Operation-specific validation should be applied by the referenced operation schema.",
+      "description": "A nested transform object used as one element in the values array. Its output string is inserted at the corresponding position in the concatenated result. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -59,18 +63,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'static', 'lower', 'trim')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -82,8 +90,54 @@
   },
   "examples": [
     {
+      "name": "Full Name from HR Source",
       "type": "concat",
-      "name": "Test Concat Transform",
+      "attributes": {
+        "values": [
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "FirstName"
+            }
+          },
+          " ",
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "LastName"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Job Title with Code",
+      "type": "concat",
+      "attributes": {
+        "values": [
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "JobTitle"
+            }
+          },
+          " - ",
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "JobCode"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Contractor Display Name",
+      "type": "concat",
       "attributes": {
         "values": [
           {
@@ -102,6 +156,38 @@
             }
           },
           " (Contractor)"
+        ]
+      }
+    },
+    {
+      "name": "Lowercase Email from Identity Attributes",
+      "type": "concat",
+      "attributes": {
+        "values": [
+          {
+            "type": "lower",
+            "attributes": {
+              "input": {
+                "type": "identityAttribute",
+                "attributes": {
+                  "name": "firstname"
+                }
+              }
+            }
+          },
+          ".",
+          {
+            "type": "lower",
+            "attributes": {
+              "input": {
+                "type": "identityAttribute",
+                "attributes": {
+                  "name": "lastname"
+                }
+              }
+            }
+          },
+          "@example.com"
         ]
       }
     }
