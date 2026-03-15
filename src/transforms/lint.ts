@@ -55,7 +55,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   rule:           "open",     // rule-specific attributes vary
   split:          new Set(["delimiter", "index", "input"]),
   static:         "open",     // value + any named VTL dynamic variable keys allowed per docs
-  substring:      new Set(["begin", "end", "input"]),
+  substring:      new Set(["begin", "beginOffset", "end", "endOffset", "input"]),
   trim:           new Set(["input"]),
   upper:          new Set(["input"]),
   usernameGenerator: new Set(["patterns", "sourceCheck"]),
@@ -1505,17 +1505,146 @@ function lintPad(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 23. substring — begin/end numbers
+// 23. substring — begin/end indexing, offset cross-checks, begin>=end guard
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/substring
 // ---------------------------------------------------------------------------
 
 function lintSubstring(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
-  if (attrs?.begin !== undefined && !isNumberish(attrs.begin)) {
-    push(msgs, "error", "begin must be a number (or numeric string).", "attributes.begin");
+
+  const begin       = attrs?.begin;
+  const end         = attrs?.end;
+  const beginOffset = attrs?.beginOffset;
+  const endOffset   = attrs?.endOffset;
+
+  // 1. begin: required integer; -1 is the "start from character 0" sentinel
+  if (begin !== undefined) {
+    if (!isNumberish(begin)) {
+      push(msgs, "error",
+        "begin must be an integer (zero-based start index). Use -1 to start from character 0.",
+        "attributes.begin"
+      );
+    } else {
+      const beginNum = Number(begin);
+
+      if (beginNum === -1) {
+        push(msgs, "info",
+          "begin: -1 starts the substring at character 0 (the very beginning of the string). " +
+          "beginOffset is ignored when begin is -1.",
+          "attributes.begin"
+        );
+      } else if (beginNum < -1) {
+        push(msgs, "error",
+          `begin value ${beginNum} is invalid. Only -1 (start at char 0) or a non-negative zero-based index are allowed.`,
+          "attributes.begin"
+        );
+      }
+
+      // beginOffset only applies when begin != -1
+      if (beginOffset !== undefined) {
+        if (!isNumberish(beginOffset)) {
+          push(msgs, "error",
+            "beginOffset must be an integer added to the begin index.",
+            "attributes.beginOffset"
+          );
+        } else if (beginNum === -1) {
+          push(msgs, "warn",
+            "beginOffset has no effect when begin is -1. beginOffset is only applied when begin is a non-negative index.",
+            "attributes.beginOffset"
+          );
+        }
+      }
+    }
   }
-  if (attrs?.end !== undefined && !isNumberish(attrs.end)) {
-    push(msgs, "error", "end must be a number (or numeric string).", "attributes.end");
+
+  // 2. end: optional integer; -1 or omitted means "through end of string"
+  if (end !== undefined) {
+    if (!isNumberish(end)) {
+      push(msgs, "error",
+        "end must be an integer (zero-based exclusive end index). Use -1 or omit end to return characters through the end of the string.",
+        "attributes.end"
+      );
+    } else {
+      const endNum = Number(end);
+
+      if (endNum === -1) {
+        push(msgs, "info",
+          "end: -1 returns all characters from begin through the end of the string. endOffset is ignored when end is -1.",
+          "attributes.end"
+        );
+      } else if (endNum < -1) {
+        push(msgs, "error",
+          `end value ${endNum} is invalid. Only -1 (through end of string) or a non-negative zero-based index are allowed.`,
+          "attributes.end"
+        );
+      }
+
+      // endOffset only applies when end is provided and end != -1
+      if (endOffset !== undefined) {
+        if (!isNumberish(endOffset)) {
+          push(msgs, "error",
+            "endOffset must be an integer added to the end index.",
+            "attributes.endOffset"
+          );
+        } else if (endNum === -1) {
+          push(msgs, "warn",
+            "endOffset has no effect when end is -1. endOffset is only applied when end is a non-negative index.",
+            "attributes.endOffset"
+          );
+        }
+      }
+    }
   }
+
+  // 3. endOffset without end is meaningless
+  if (endOffset !== undefined && end === undefined) {
+    push(msgs, "warn",
+      "endOffset has no effect when end is not provided. endOffset is only applied when end is explicitly set to a non-negative index.",
+      "attributes.endOffset"
+    );
+  }
+
+  // 4. Effective begin >= effective end guard
+  if (
+    begin !== undefined && end !== undefined &&
+    isNumberish(begin) && isNumberish(end)
+  ) {
+    const beginNum = Number(begin);
+    const endNum   = Number(end);
+
+    if (beginNum !== -1 && endNum !== -1) {
+      const effectiveBegin = beginNum + (isNumberish(beginOffset) ? Number(beginOffset) : 0);
+      const effectiveEnd   = endNum   + (isNumberish(endOffset)   ? Number(endOffset)   : 0);
+
+      if (effectiveBegin >= effectiveEnd) {
+        push(msgs, "error",
+          `Effective begin (${effectiveBegin}) is ≥ effective end (${effectiveEnd}). ` +
+          "This produces an empty or error result. Ensure begin + beginOffset < end + endOffset.",
+          "attributes"
+        );
+      }
+    }
+  }
+
+  // 5. "Last N chars" limitation note — docs explicitly call this out and recommend getEndOfString
+  push(msgs, "info",
+    "To extract the last N characters of a string, use the getEndOfString transform instead. " +
+    "The substring transform does not provide an easy way to extract characters from the end of a string.",
+    "attributes"
+  );
+
+  // 6. input: validate type if provided (optional per docs)
+  if (attrs?.input !== undefined) {
+    const inp = attrs.input;
+    if (!(typeof inp === "string" || (isPlainObject(inp) && typeof (inp as any).type === "string"))) {
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} providing the string to extract from, or a static string. " +
+        "If omitted, the transform uses the source+attribute combination configured in the identity profile UI.",
+        "attributes.input"
+      );
+    }
+  }
+
   return msgs;
 }
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.substring.schema.json",
   "title": "SailPoint ISC Transform Schema - substring",
-  "description": "Strict schema derived from the SailPoint official Substring operation documentation. Returns a substring of the input string using begin/end indices (zero-based) plus optional offsets. Doc constraints: begin=-1 means start at 0; beginOffset only applies when begin != -1; end=-1 or omitted means to the end; endOffset only applies when end is provided and end != -1.",
+  "description": "Strict schema for the SailPoint ISC substring transform. Returns a portion of the input string using zero-based indexing. begin is the inclusive start position; end is the exclusive end position. Offset fields add characters to their respective boundary. Key sentinel values: begin=-1 means start at character 0 (beginOffset is ignored); end=-1 or omitted means return through the end of the string (endOffset is ignored). LIMITATION: The substring transform does not provide an easy way to get the last N characters of a string — use the getEndOfString transform instead.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "substring"
+      "const": "substring",
+      "description": "Transform operation type. Must be exactly 'substring'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of the identity refresh process. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -29,26 +31,31 @@
       "required": [
         "begin"
       ],
+      "description": "Required container for substring operation attributes.",
       "properties": {
         "begin": {
           "type": "integer",
-          "description": "Begin index (inclusive). If -1, transform begins at character 0."
+          "description": "Required. Zero-based inclusive start index of the substring. The character at this position is included in the result. Special value: -1 means start at character 0 (the very beginning of the string), and beginOffset is ignored when begin is -1. Must be -1 or a non-negative integer."
         },
         "beginOffset": {
           "type": "integer",
-          "description": "Number of characters to add to begin. Only used if begin is not -1."
+          "description": "Optional. Integer added to the begin value to shift the start position. Only applied when begin is not -1. Example: begin=1, beginOffset=1 results in an effective start of character 2. Ignored when begin is -1."
         },
         "end": {
           "type": "integer",
-          "description": "End index (exclusive). If -1 or omitted, returns through end of string."
+          "description": "Optional. Zero-based exclusive end index of the substring. The character at this position is NOT included in the result. If omitted or set to -1, the substring extends through the end of the string. Must be -1 or a non-negative integer greater than the effective begin position."
         },
         "endOffset": {
           "type": "integer",
-          "description": "Number of characters to add to end. Only used if end is provided and is not -1."
+          "description": "Optional. Integer added to the end value to shift the end position. Only applied when end is provided and is not -1. Example: end=3, endOffset=2 results in an effective end of character 5. Ignored when end is -1 or omitted."
         },
         "input": {
-          "description": "Optional explicit input passed into the transform (nested transform). If omitted, uses UI-configured input.",
-          "oneOf": [
+          "description": "Optional explicit input providing the string to extract from. If omitted, the transform uses the source and attribute combination configured in the identity profile UI. When provided, must be a nested transform object or a static string.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Static string value to extract from."
+            },
             {
               "$ref": "#/$defs/NestedTransform"
             }
@@ -57,54 +64,34 @@
       },
       "allOf": [
         {
-          "description": "beginOffset is only meaningful when begin != -1. If begin == -1, beginOffset should be omitted.",
+          "description": "beginOffset is only meaningful when begin != -1. When begin is -1, beginOffset must not be present.",
           "if": {
             "properties": {
-              "begin": {
-                "const": -1
-              }
+              "begin": { "const": -1 }
             },
-            "required": [
-              "begin"
-            ]
+            "required": ["begin"]
           },
           "then": {
-            "not": {
-              "required": [
-                "beginOffset"
-              ]
-            }
+            "not": { "required": ["beginOffset"] }
           }
         },
         {
-          "description": "endOffset is only meaningful when end is provided and end != -1. If end is absent or -1, endOffset should be omitted.",
+          "description": "endOffset is only meaningful when end is provided and end != -1. When end is absent or -1, endOffset must not be present.",
           "if": {
             "anyOf": [
               {
-                "not": {
-                  "required": [
-                    "end"
-                  ]
-                }
+                "not": { "required": ["end"] }
               },
               {
                 "properties": {
-                  "end": {
-                    "const": -1
-                  }
+                  "end": { "const": -1 }
                 },
-                "required": [
-                  "end"
-                ]
+                "required": ["end"]
               }
             ]
           },
           "then": {
-            "not": {
-              "required": [
-                "endOffset"
-              ]
-            }
+            "not": { "required": ["endOffset"] }
           }
         }
       ]
@@ -113,54 +100,86 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used as explicit input (name optional in docs).",
+      "description": "A nested transform object that provides the string input for the substring operation. Its output string is the value the extraction is applied to. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
-        "type"
+        "type",
+        "attributes"
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'trim')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
-          "type": [
-            "object",
-            "null"
-          ],
+          "type": "object",
           "additionalProperties": true,
-          "description": "Operation-specific attributes for the nested transform (may be omitted for operations without attributes)."
+          "description": "Operation-specific attributes for the nested transform."
         }
       }
     }
   },
   "examples": [
     {
+      "name": "Extract Characters 2 to 4 (abcdef → cd)",
       "type": "substring",
-      "name": "Substring Transform",
       "attributes": {
         "begin": 2,
         "end": 4
       }
     },
     {
+      "name": "Extract from Start to Index 3",
       "type": "substring",
-      "name": "Substring Transform (Offsets)",
+      "attributes": {
+        "begin": -1,
+        "end": 3
+      }
+    },
+    {
+      "name": "Extract from Index 2 to End of String",
+      "type": "substring",
+      "attributes": {
+        "begin": 2
+      }
+    },
+    {
+      "name": "Extract with Offsets (abcdef → cde)",
+      "type": "substring",
       "attributes": {
         "begin": 1,
-        "end": 3,
         "beginOffset": 1,
+        "end": 3,
         "endOffset": 2
+      }
+    },
+    {
+      "name": "Extract Domain from Account Attribute",
+      "type": "substring",
+      "attributes": {
+        "begin": 0,
+        "end": 3,
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "costCenter"
+          }
+        }
       }
     }
   ]
