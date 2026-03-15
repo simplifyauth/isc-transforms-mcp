@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.firstValid.schema.json",
   "title": "SailPoint ISC Transform Schema - firstValid",
-  "description": "Strict schema derived from SailPoint official First Valid operation documentation. Returns the first non-null value from a list of values/transforms. Optional ignoreErrors controls whether evaluation errors are ignored.",
+  "description": "Strict schema for the SailPoint ISC First Valid transform. Evaluates an ordered array of values or nested transforms and returns the first entry that produces a non-null result. Entries are evaluated left-to-right; the highest-priority source should be listed first with a static string fallback last. ignoreErrors controls whether evaluation errors (e.g., NPE on missing manager) are skipped or thrown.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "firstValid"
+      "const": "firstValid",
+      "description": "Transform operation type. Must be exactly 'firstValid'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -33,29 +35,12 @@
         "values": {
           "type": "array",
           "minItems": 1,
-          "description": "Ordered list of values/transforms. The first non-null result is returned.",
+          "description": "Ordered list of values to evaluate. The first entry that produces a non-null result is returned. Entries are evaluated left-to-right — place highest-priority sources first and include a static string as the last entry to guarantee a fallback. Each entry must be a static string or a nested transform object.",
           "items": {
-            "oneOf": [
+            "anyOf": [
               {
-                "type": "string"
-              },
-              {
-                "type": "number"
-              },
-              {
-                "type": "integer"
-              },
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "array"
-              },
-              {
-                "type": "object"
-              },
-              {
-                "type": "null"
+                "type": "string",
+                "description": "Static string value. Use as a fallback (e.g., 'none', 'N/A') or a fixed value option."
               },
               {
                 "$ref": "#/$defs/NestedTransform"
@@ -66,7 +51,7 @@
         "ignoreErrors": {
           "type": "boolean",
           "default": false,
-          "description": "If true, errors from evaluating a value/transform are ignored and evaluation continues. Default false."
+          "description": "Controls error handling during evaluation. false (default) = throw on errors such as null pointer exceptions (e.g., accessing a manager attribute for a user with no manager). true = catch errors silently and move to the next entry in values. Set to true when any entry may throw on some identities."
         }
       }
     }
@@ -74,7 +59,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used inside values[]; docs examples often omit 'name' for nested transforms.",
+      "description": "A nested transform object used as an entry in the values array. Must have a 'type' field. Common types: accountAttribute, identityAttribute, static, getReferenceIdentityAttribute. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -82,18 +67,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'static', 'getReferenceIdentityAttribute')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -105,8 +94,8 @@
   },
   "examples": [
     {
+      "name": "Preferred Name with Fallback",
       "type": "firstValid",
-      "name": "First Valid Transform",
       "attributes": {
         "values": [
           {
@@ -120,9 +109,53 @@
             "attributes": {
               "name": "givenName"
             }
-          }
+          },
+          "Unknown"
         ],
         "ignoreErrors": false
+      }
+    },
+    {
+      "name": "Work Email Fallback to Personal Email",
+      "type": "firstValid",
+      "attributes": {
+        "values": [
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "Active Directory",
+              "attributeName": "mail"
+            }
+          },
+          {
+            "type": "accountAttribute",
+            "attributes": {
+              "sourceName": "HR Source",
+              "attributeName": "personal_email"
+            }
+          },
+          "no-email@example.com"
+        ],
+        "ignoreErrors": true
+      }
+    },
+    {
+      "name": "Manager Email with NPE Protection",
+      "type": "firstValid",
+      "attributes": {
+        "values": [
+          {
+            "type": "getReferenceIdentityAttribute",
+            "attributes": {
+              "name": "Cloud Services Deployment Utility",
+              "operation": "getReferenceIdentityAttribute",
+              "uid": "manager",
+              "attributeName": "email"
+            }
+          },
+          "no-manager@example.com"
+        ],
+        "ignoreErrors": true
       }
     }
   ]

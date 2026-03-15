@@ -35,7 +35,7 @@ const ALLOWED_ATTRS: Record<string, Set<string> | "open"> = {
   decomposeDiacriticalMarks: new Set(["input"]),
   displayName:    new Set(["input"]),
   e164phone:      new Set(["input", "defaultRegion"]),
-  firstValid:     new Set(["values", "input"]),
+  firstValid:     new Set(["values", "ignoreErrors"]),
   identityAttribute: new Set(["name", "input"]),
   indexOf:        new Set(["substring", "input"]),
   iso3166:        new Set(["format", "input"]),
@@ -463,7 +463,126 @@ function lintConditional(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 7. replace — validate regex compiles
+// 7. firstValid — values array + ignoreErrors
+// ---------------------------------------------------------------------------
+
+function lintFirstValid(attrs: any): LintMessage[] {
+  const msgs: LintMessage[] = [];
+  const values = attrs?.values;
+
+  // --- 1. values: required non-empty array (schema enforces, lint gives richer message) ---
+  if (values === undefined || values === null) {
+    push(msgs, "error",
+      "values is required for firstValid. Provide an ordered array of strings or nested transforms — first non-null result is returned.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+  if (!Array.isArray(values)) {
+    push(msgs, "error",
+      "values must be an array of strings and/or nested transform objects.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+  if (values.length === 0) {
+    push(msgs, "error",
+      "values array must not be empty. Provide at least one string or nested transform.",
+      "attributes.values"
+    );
+    return msgs;
+  }
+
+  // --- 2. Warn if only one value — firstValid is pointless with a single entry ---
+  if (values.length === 1) {
+    push(msgs, "warn",
+      "values array has only one entry. firstValid is designed to fall back across multiple options — " +
+      "consider adding additional fallback values or using a simpler transform.",
+      "attributes.values"
+    );
+  }
+
+  // --- 3. Validate each item: must be string or nested transform object ---
+  values.forEach((item: any, idx: number) => {
+    if (item === null || item === undefined) {
+      push(msgs, "warn",
+        `values[${idx}] is null/undefined — this entry will always be skipped. Remove it or replace with a static string fallback.`,
+        `attributes.values[${idx}]`
+      );
+    } else if (typeof item === "string") {
+      // strings are valid — no error
+    } else if (isPlainObject(item)) {
+      if (typeof (item as any).type !== "string" || (item as any).type.trim() === "") {
+        push(msgs, "error",
+          `values[${idx}] is an object but is missing a 'type' field — it does not look like a valid nested transform. ` +
+          "Add a 'type' (e.g., 'accountAttribute', 'identityAttribute', 'static').",
+          `attributes.values[${idx}]`
+        );
+      }
+    } else {
+      push(msgs, "error",
+        `values[${idx}] must be a string or a nested transform object {type, attributes}. ` +
+        `Got: ${typeof item}.`,
+        `attributes.values[${idx}]`
+      );
+    }
+  });
+
+  // --- 4. Recommend a string fallback as the last entry ---
+  const lastItem = values[values.length - 1];
+  if (values.length > 1 && typeof lastItem !== "string") {
+    push(msgs, "info",
+      "Consider making the last entry in values a static string fallback (e.g., 'none', 'N/A') " +
+      "to guarantee a non-null result when all other values are unavailable.",
+      "attributes.values"
+    );
+  }
+
+  // --- 5. ignoreErrors: boolean check + semantics info ---
+  if (attrs?.ignoreErrors !== undefined) {
+    if (typeof attrs.ignoreErrors !== "boolean") {
+      push(msgs, "error",
+        "ignoreErrors must be a boolean. " +
+        "true = skip values that throw errors (e.g., NPE on missing manager) and evaluate next entry. " +
+        "false = throw on errors (default).",
+        "attributes.ignoreErrors"
+      );
+    } else if (attrs.ignoreErrors === false) {
+      // Explicit false — check if any nested transforms reference identity attributes that could NPE
+      const hasReferenceTransforms = values.some(
+        (v: any) => isPlainObject(v) &&
+          ["identityAttribute", "accountAttribute", "getReferenceIdentityAttribute"].includes((v as any).type)
+      );
+      if (hasReferenceTransforms) {
+        push(msgs, "info",
+          "ignoreErrors is false (default). If any entry references an attribute that doesn't exist on some identities " +
+          "(e.g., a manager attribute for users without managers), a null pointer exception will stop evaluation. " +
+          "Set ignoreErrors: true to safely skip failing entries.",
+          "attributes.ignoreErrors"
+        );
+      }
+    }
+  } else {
+    // ignoreErrors not set — same NPE risk hint if reference transforms present
+    const hasReferenceTransforms = values.some(
+      (v: any) => isPlainObject(v) &&
+        ["identityAttribute", "accountAttribute", "getReferenceIdentityAttribute"].includes((v as any).type)
+    );
+    if (hasReferenceTransforms) {
+      push(msgs, "info",
+        "ignoreErrors defaults to false. If any entry may throw an error on some identities " +
+        "(e.g., accessing a manager attribute for users without managers), set ignoreErrors: true " +
+        "to skip failing entries instead of halting evaluation.",
+        "attributes.ignoreErrors"
+      );
+    }
+  }
+
+  return msgs;
+}
+
+// ---------------------------------------------------------------------------
+// 8. replace — validate regex compiles
 // ---------------------------------------------------------------------------
 
 function lintReplace(attrs: any): LintMessage[] {
@@ -1359,6 +1478,7 @@ export function lintTransform(input: any): { normalized: any; messages: LintMess
   // --- Operation-specific lint ---
   if (requestedType === "accountAttribute")             messages.push(...lintAccountAttribute(attrs));
   if (requestedType === "conditional")                  messages.push(...lintConditional(attrs));
+  if (requestedType === "firstValid")                   messages.push(...lintFirstValid(attrs));
   if (requestedType === "replace")                      messages.push(...lintReplace(attrs));
   if (requestedType === "replaceAll")                   messages.push(...lintReplaceAll(attrs));
   if (requestedType === "dateMath")                     messages.push(...lintDateMath(attrs));
