@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.replace.schema.json",
   "title": "SailPoint ISC Transform Schema - replace",
-  "description": "Strict schema derived from SailPoint official Replace operation documentation. Find and replace all instances of a single regex pattern in the incoming value.",
+  "description": "Strict schema for the SailPoint ISC replace transform. Finds all occurrences of a single Java regular expression pattern in the input string and replaces every match with the replacement string. Unlike replaceAll, this operates on a single regex+replacement pair. Key behaviors: (1) ALL occurrences are replaced, not just the first. (2) Use an empty replacement string to delete all matched text. (3) Capture groups in the regex can be referenced as $1, $2, etc. in the replacement. (4) Use bracket notation for literal special characters (e.g., '[.]' for a literal dot). (5) input is optional — if omitted the transform uses the source+attribute configured in the identity profile UI.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "replace"
+      "const": "replace",
+      "description": "Transform operation type. Must be exactly 'replace'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -30,19 +32,24 @@
         "regex",
         "replacement"
       ],
+      "description": "Required container for replace operation attributes.",
       "properties": {
         "regex": {
           "type": "string",
           "minLength": 1,
-          "description": "Regular expression pattern to replace."
+          "description": "Required. The Java regular expression pattern to search for. ALL occurrences of the pattern in the input are replaced — not just the first match. Pattern syntax notes: (1) Standard Java regex — character classes, quantifiers, anchors, and capture groups are all supported. (2) Use bracket notation to match literal special regex characters: '[.]' for a literal dot, '[+]' for a literal plus, '[-]' for a literal hyphen. (3) Capture groups with parentheses (e.g., '([A-Za-z]+)') can be back-referenced in the replacement field as $1, $2, etc. (4) The pattern is case-sensitive by default — use character classes (e.g., '[Aa]') or inline flag '(?i)' to match case-insensitively."
         },
         "replacement": {
           "type": "string",
-          "description": "Replacement string."
+          "description": "Required. The string that replaces every occurrence of the matched pattern. Replacement notes: (1) Use an empty string \"\" to delete all matched text. (2) Use $0 to insert the entire matched text, $1 for the first capture group, $2 for the second, etc. (3) To include a literal dollar sign, use \\$."
         },
         "input": {
-          "description": "Optional explicit input passed into the transform (nested transform). If omitted, uses UI-configured input.",
-          "oneOf": [
+          "description": "Optional explicit input providing the string to apply the regex replacement to. If omitted, the transform uses the source and attribute combination configured in the identity profile UI. When provided, must be a nested transform object or a static string.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Static string value to apply the regex replacement to."
+            },
             {
               "$ref": "#/$defs/NestedTransform"
             }
@@ -54,7 +61,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used as explicit input (name optional in docs).",
+      "description": "A nested transform object that provides the string input for the replace operation. Its output string is the value the regex replacement is applied to. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -62,18 +69,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'trim')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -85,11 +96,48 @@
   },
   "examples": [
     {
+      "name": "Replace Whitespace with Underscore",
       "type": "replace",
-      "name": "Replace Transform",
       "attributes": {
         "regex": "\\s+",
         "replacement": "_"
+      }
+    },
+    {
+      "name": "Remove Non-Alphanumeric Characters",
+      "type": "replace",
+      "attributes": {
+        "regex": "[^A-Za-z0-9]",
+        "replacement": ""
+      }
+    },
+    {
+      "name": "Extract Domain from Email (Capture Group)",
+      "type": "replace",
+      "attributes": {
+        "regex": "^[^@]+@(.+)$",
+        "replacement": "$1",
+        "input": {
+          "type": "identityAttribute",
+          "attributes": {
+            "name": "email"
+          }
+        }
+      }
+    },
+    {
+      "name": "Replace Literal Dots with Hyphens",
+      "type": "replace",
+      "attributes": {
+        "regex": "[.]",
+        "replacement": "-",
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "displayName"
+          }
+        }
       }
     }
   ]

@@ -582,37 +582,68 @@ function lintFirstValid(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 8. replace — validate regex compiles
+// 8. replace — regex compile, all-instances info, backreference hint
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/replace
 // ---------------------------------------------------------------------------
 
 function lintReplace(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
 
+  // 1. regex: must be a non-empty string and a valid compilable regex
   if (attrs?.regex !== undefined) {
     if (typeof attrs.regex !== "string") {
       push(msgs, "error", "regex must be a string.", "attributes.regex");
+    } else if (attrs.regex.trim() === "") {
+      push(msgs, "error", "regex must not be empty.", "attributes.regex");
     } else {
-      // Try to compile the regex — catch syntax errors early before ISC does
+      // Compile check — surface syntax errors before ISC does
       try {
         new RegExp(attrs.regex);
       } catch (e: any) {
         push(msgs, "error",
-          `regex '${attrs.regex}' is not a valid regular expression: ${e?.message ?? e}.`,
+          `regex '${attrs.regex}' is not a valid regular expression: ${e?.message ?? String(e)}. ` +
+          "Use bracket notation for literal special characters (e.g., '[.]' for a literal dot, '[-]' for a literal hyphen).",
           "attributes.regex"
         );
       }
+
+      // All-instances info — users often expect first-match-only behaviour
+      push(msgs, "info",
+        "replace replaces ALL occurrences of the pattern in the input string, not just the first match. " +
+        "To target only a specific occurrence, use a more precise regex that anchors to the position you want.",
+        "attributes.regex"
+      );
     }
   }
 
-  if (attrs?.replacement !== undefined && typeof attrs.replacement !== "string") {
-    push(msgs, "error", "replacement must be a string.", "attributes.replacement");
+  // 2. replacement: must be a string; empty string is valid and deletes all matches
+  if (attrs?.replacement !== undefined) {
+    if (typeof attrs.replacement !== "string") {
+      push(msgs, "error",
+        "replacement must be a string. Use an empty string \"\" to delete all text matched by the regex.",
+        "attributes.replacement"
+      );
+    } else if (/\$\d+/.test(attrs.replacement)) {
+      // Backreference detected — confirm the regex has the matching capture group
+      push(msgs, "info",
+        "replacement contains a backreference (e.g., '$1'). Ensure the regex contains a matching capture group (e.g., '(.+)'). " +
+        "'$0' refers to the entire match; '$1' refers to the first capture group, '$2' to the second, etc.",
+        "attributes.replacement"
+      );
+    }
   }
 
-  if (attrs?.input === undefined) {
-    push(msgs, "warn",
-      "replace typically expects an attributes.input (nested transform or attribute reference).",
-      "attributes.input"
-    );
+  // 3. input: optional per docs (omit to use UI-configured source+attribute).
+  //    Validate type only when present.
+  if (attrs?.input !== undefined) {
+    const inp = attrs.input;
+    if (!(typeof inp === "string" || (isPlainObject(inp) && typeof (inp as any).type === "string"))) {
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} providing the string to apply the regex to, or a static string. " +
+        "If omitted, the transform uses the source+attribute combination configured in the identity profile UI.",
+        "attributes.input"
+      );
+    }
   }
 
   return msgs;
