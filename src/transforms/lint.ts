@@ -539,7 +539,10 @@ function lintDateCompare(attrs: any): LintMessage[] {
 
 function lintDateFormat(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
-  const NAMED_FORMATS = new Set(["ISO8601", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32", "LDAP_GENERALIZED_TIME"]);
+  // Exact set of named formats per SailPoint docs — no variants accepted.
+  const NAMED_FORMATS = new Set(["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"]);
+  // A value that is ALL_CAPS_WITH_UNDERSCORES is clearly intended as a named constant, not a pattern.
+  const looksLikeNamedConstant = (s: string) => /^[A-Z][A-Z0-9_]+$/.test(s);
   const isLikelyPattern = (s: string) => /[yMdHhmsSZ]/.test(s);
 
   const checkFmt = (field: "inputFormat" | "outputFormat") => {
@@ -550,18 +553,24 @@ function lintDateFormat(attrs: any): LintMessage[] {
       return;
     }
     const t = raw.trim();
-    const lower = t.toLowerCase();
-    if (lower === "epoch" || lower === "unix" || lower === "unixtime" || lower === "javaepoch") {
-      push(msgs, "error",
-        `Unsupported ${field} '${t}'. Use a documented named format: ${Array.from(NAMED_FORMATS).join(", ")}.`,
-        `attributes.${field}`
-      );
+    // If the value looks like a named constant (ALL_CAPS_UNDERSCORES), validate strictly.
+    // Do NOT fall through to isLikelyPattern — e.g. EPOCH_TIME_JAVA_IN_MILLIS contains
+    // 'H' and 'M' and would falsely pass the pattern check.
+    if (looksLikeNamedConstant(t)) {
+      if (!NAMED_FORMATS.has(t)) {
+        push(msgs, "error",
+          `'${t}' is not a valid named format for ${field}. ` +
+          `Allowed named formats: ${Array.from(NAMED_FORMATS).join(", ")}. ` +
+          `Alternatively, use a Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ).`,
+          `attributes.${field}`
+        );
+      }
       return;
     }
-    if (NAMED_FORMATS.has(t.toUpperCase())) return;
+    // Value looks like a date pattern — check it has at least one date token.
     if (!isLikelyPattern(t)) {
       push(msgs, "warn",
-        `${field} '${t}' doesn't match a known named format and doesn't look like a date pattern (missing date tokens like y/M/d/H).`,
+        `${field} '${t}' doesn't match a known named format and doesn't look like a date pattern (missing tokens like y/M/d/H).`,
         `attributes.${field}`
       );
     }

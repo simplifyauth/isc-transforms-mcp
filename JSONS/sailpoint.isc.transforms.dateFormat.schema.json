@@ -28,14 +28,34 @@
       "additionalProperties": false,
       "properties": {
         "inputFormat": {
-          "type": "string",
           "default": "ISO8601",
-          "description": "Format of the incoming date. Java SimpleDateFormat pattern or built-in named format."
+          "description": "Format of the incoming date. Must be one of the 5 named formats or a Java SimpleDateFormat pattern.",
+          "anyOf": [
+            {
+              "enum": ["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"],
+              "description": "Built-in named format."
+            },
+            {
+              "type": "string",
+              "not": { "pattern": "^[A-Z][A-Z0-9_]+$" },
+              "description": "Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ)."
+            }
+          ]
         },
         "outputFormat": {
-          "type": "string",
           "default": "ISO8601",
-          "description": "Desired output format. Java SimpleDateFormat pattern or built-in named format."
+          "description": "Desired output format. Must be one of the 5 named formats or a Java SimpleDateFormat pattern.",
+          "anyOf": [
+            {
+              "enum": ["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"],
+              "description": "Built-in named format."
+            },
+            {
+              "type": "string",
+              "not": { "pattern": "^[A-Z][A-Z0-9_]+$" },
+              "description": "Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ)."
+            }
+          ]
         },
         "input": {
           "description": "Explicitly defines the input data passed into the transform. Docs specify an object; in practice this is a nested transform object. If omitted, the transform uses the UI-configured source+attribute input.",
