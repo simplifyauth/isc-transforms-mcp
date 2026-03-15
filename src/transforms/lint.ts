@@ -157,7 +157,8 @@ function checkRequired(spec: TransformSpec, attrs: any): LintMessage[] {
       continue;
     }
     const val = attrs?.[req];
-    if (val === undefined || val === null || (typeof val === "string" && val.length === 0)) {
+    // Empty string "" is intentional for fields like negativeCondition, positiveCondition, static.value
+    if (val === undefined || val === null) {
       push(msgs, "error", `Missing required attribute: ${req}.`, `attributes.${req}`);
     }
   }
@@ -354,36 +355,41 @@ function lintConditional(attrs: any): LintMessage[] {
   }
 
   // --- 2. Forbidden operators (using any of these throws IllegalArgumentException at runtime) ---
+  // If a forbidden operator is found, that is the root cause. Skip rules 3 and 4 to avoid
+  // duplicate errors (they would fire as consequences of the forbidden operator, not separate issues).
   const forbidden = /(!=|==|>=|<=|>|<|\bne\b|\bgt\b|\blt\b|\bge\b|\ble\b)/i;
-  if (forbidden.test(expr)) {
+  const forbiddenOpFound = forbidden.test(expr);
+  if (forbiddenOpFound) {
     push(msgs, "error",
-      `Unsupported operator in expression '${expr}'. ` +
-      "Only 'eq' is supported — using !=, ==, >, <, ne, gt, lt, ge, le throws IllegalArgumentException at runtime.",
+      `Unsupported operator in expression: '${expr}'. Only 'eq' comparator is supported ` +
+      "(e.g., '$var eq value'). Using !=, ==, >, <, ne, gt, lt, ge, le throws IllegalArgumentException at runtime.",
       "attributes.expression"
     );
   }
 
-  // --- 3. Must contain exactly one 'eq' ---
+  // --- 3. Must contain exactly one 'eq' (skip if forbidden operator already diagnosed) ---
   const eqMatches = expr.match(/\beq\b/gi) ?? [];
-  if (eqMatches.length === 0) {
-    push(msgs, "error",
-      `Conditional expression must use the 'eq' comparator: '<ValueA> eq <ValueB>'. Got: '${expr}'.`,
-      "attributes.expression"
-    );
-  } else if (eqMatches.length > 1) {
-    push(msgs, "error",
-      `Expression must contain exactly one 'eq'. Found ${eqMatches.length} occurrences in: '${expr}'. ` +
-      "Nest multiple conditions using separate conditional transforms if needed.",
-      "attributes.expression"
-    );
+  if (!forbiddenOpFound) {
+    if (eqMatches.length === 0) {
+      push(msgs, "error",
+        `Conditional expression must use the 'eq' comparator: '<ValueA> eq <ValueB>'. Got: '${expr}'.`,
+        "attributes.expression"
+      );
+    } else if (eqMatches.length > 1) {
+      push(msgs, "error",
+        `Expression must contain exactly one 'eq'. Found ${eqMatches.length} occurrences in: '${expr}'. ` +
+        "Nest multiple conditions using separate conditional transforms if needed.",
+        "attributes.expression"
+      );
+    }
   }
 
-  // --- 4. Both sides of 'eq' must be non-empty ---
+  // --- 4. Both sides of 'eq' must be non-empty (skip if forbidden operator already diagnosed) ---
   const parts = expr.split(/\beq\b/i);
   const valueA = parts[0]?.trim() ?? "";
   const valueB = parts[1]?.trim() ?? "";
 
-  if (parts.length !== 2 || valueA.length === 0 || valueB.length === 0) {
+  if (!forbiddenOpFound && (parts.length !== 2 || valueA.length === 0 || valueB.length === 0)) {
     push(msgs, "error",
       `Expression must follow '<ValueA> eq <ValueB>' with non-empty values on both sides. Got: '${expr}'.`,
       "attributes.expression"
@@ -1156,6 +1162,16 @@ function lintDateFormat(attrs: any): LintMessage[] {
         `attributes.${field}`
       );
     }
+    // Warn on uppercase Y (week-year) — a very common Java SimpleDateFormat mistake.
+    // YYYY = ISO 8601 week-based year (e.g. 2023-12-30 could become 2024); yyyy = calendar year.
+    if (/Y/.test(t) && !/^[A-Z][A-Z0-9_]+$/.test(t)) {
+      push(msgs, "warn",
+        `${field} '${t}' contains uppercase 'Y' which is the ISO 8601 week-year in Java SimpleDateFormat, NOT the calendar year. ` +
+        "This is a common mistake: 'YYYY' for a December date can silently produce the following year's number. " +
+        "Use lowercase 'yyyy' for the calendar year (e.g., 'dd-MM-yyyy' instead of 'dd-MM-YYYY').",
+        `attributes.${field}`
+      );
+    }
   };
 
   checkFmt("inputFormat");
@@ -1837,9 +1853,20 @@ function lintStatic(attrs: any): LintMessage[] {
       vtlRefs.add(m[1]);
     }
 
+    // 3a. Detect VTL-local variables assigned via #set($var = ...) — these are internal
+    // VTL temporaries, NOT dynamic attributes that need to be defined in the attributes object.
+    const vtlLocalVars = new Set<string>();
+    const setPattern = /#set\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*[=\s]/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = setPattern.exec(value)) !== null) {
+      vtlLocalVars.add(sm[1]);
+    }
+
     if (vtlRefs.size > 0) {
-      // 4. Warn for each VTL reference that has no matching dynamic variable in attributes
+      // 4. Warn for each VTL reference that has no matching dynamic variable in attributes.
+      // Skip VTL-local variables (those assigned with #set inside the template itself).
       for (const varName of vtlRefs) {
+        if (vtlLocalVars.has(varName)) continue; // #set local — not an attribute
         if (!Object.prototype.hasOwnProperty.call(attrs, varName)) {
           push(msgs, "warn",
             `VTL references $${varName} in value but no dynamic variable '${varName}' is defined in attributes. ` +
