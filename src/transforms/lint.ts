@@ -529,32 +529,44 @@ function lintDateMath(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
   const expr = attrs?.expression;
 
+  let startsWithNow = false;
+  let sawRound = false;
+
   if (expr !== undefined) {
     if (typeof expr !== "string" || expr.trim().length === 0) {
       push(msgs, "error", "expression must be a non-empty string.", "attributes.expression");
     } else {
       const s = expr.trim();
 
+      // --- No whitespace allowed ---
       if (/\s/.test(s)) {
         push(msgs, "error", "expression must not contain whitespace.", "attributes.expression");
       }
 
+      // --- Valid character set: digits, y M w d h m s, n o w (for 'now'), +, -, / ---
       if (!/^[0-9yMwdhmsnow+\-/]+$/.test(s)) {
         push(msgs, "error",
-          "expression contains invalid characters. Allowed: digits, y M w d h m s, now, +, -, /.",
+          "expression contains invalid characters. " +
+          "Allowed units: y(year) M(month) w(week) d(day) h(hour) m(minute) s(second), keyword 'now', operators: + - /.",
           "attributes.expression"
         );
       }
 
       let i = 0;
       const n = s.length;
-      const startsWithNow = s.startsWith("now");
+      startsWithNow = s.startsWith("now");
       if (startsWithNow) i += 3;
+
+      // 'now' must only appear at the start
       if (!startsWithNow && s.includes("now")) {
-        push(msgs, "error", "'now' keyword must appear only at the start of the expression.", "attributes.expression");
+        push(msgs, "error",
+          "'now' keyword must appear only at the start of the expression (e.g., 'now-5d/d', 'now+1w').",
+          "attributes.expression"
+        );
       }
 
-      let sawOp = false, sawRound = false, roundUnit: string | null = null;
+      let sawOp = false;
+      let roundUnit: string | null = null;
 
       const readInt = (): string | null => {
         const start = i;
@@ -570,67 +582,162 @@ function lintDateMath(attrs: any): LintMessage[] {
       };
       const readSignedTerm = (op: "+" | "-") => {
         const num = readInt();
-        if (!num) { push(msgs, "error", `Missing integer after '${op}' in expression.`, "attributes.expression"); return; }
-        if (Number(num) === 0) push(msgs, "warn", `Term '${op}${num}' is a no-op (zero).`, "attributes.expression");
+        if (!num) {
+          push(msgs, "error", `Missing integer after '${op}' in expression. Example: '${op}3d'.`, "attributes.expression");
+          return;
+        }
+        if (Number(num) === 0) {
+          push(msgs, "warn", `Term '${op}${num}' adds/subtracts zero — this is a no-op.`, "attributes.expression");
+        }
         const unit = readUnit();
-        if (!unit) push(msgs, "error", `Missing unit after '${op}${num}'. Allowed: y M w d h m s.`, "attributes.expression");
+        if (!unit) {
+          push(msgs, "error",
+            `Missing time unit after '${op}${num}'. Allowed units: y(year) M(month) w(week) d(day) h(hour) m(minute) s(second).`,
+            "attributes.expression"
+          );
+        }
       };
       const readRound = () => {
         const unit = readUnit();
-        if (!unit) { push(msgs, "error", "Rounding '/' must be followed by a unit (y M w d h m s).", "attributes.expression"); return; }
-        sawRound = true; roundUnit = unit;
+        if (!unit) {
+          push(msgs, "error",
+            "Rounding operator '/' must be followed by a time unit. Allowed: y M d h m s (NOT w — week rounding is unsupported).",
+            "attributes.expression"
+          );
+          return;
+        }
+        sawRound = true;
+        roundUnit = unit;
       };
 
       if (i < n && s[i] === "/") {
         i++; readRound();
-        if (i < n) push(msgs, "error", "Rounding must be the last part of the expression.", "attributes.expression");
+        if (i < n) push(msgs, "error", "Rounding '/' must be the last segment of the expression (e.g., 'now-5d/d').", "attributes.expression");
       } else {
         while (i < n) {
           const ch = s[i]!;
           if (ch === "+" || ch === "-") {
-            if (sawRound) { push(msgs, "error", "Add/subtract terms cannot appear after rounding ('/').", "attributes.expression"); break; }
+            if (sawRound) {
+              push(msgs, "error", "Add/subtract terms cannot appear after the rounding operator ('/').", "attributes.expression");
+              break;
+            }
             sawOp = true; i++;
             readSignedTerm(ch as "+" | "-");
             continue;
           }
           if (ch === "/") {
-            if (sawRound) { push(msgs, "error", "Only one rounding operator '/' is supported.", "attributes.expression"); break; }
+            if (sawRound) {
+              push(msgs, "error", "Only one rounding operator '/' is allowed per expression.", "attributes.expression");
+              break;
+            }
             i++; readRound();
-            if (i < n) push(msgs, "error", "Rounding must be the last part of the expression.", "attributes.expression");
+            if (i < n) push(msgs, "error", "Rounding '/' must be the last segment of the expression.", "attributes.expression");
             break;
           }
-          push(msgs, "error", `Unexpected token '${ch}'. Use patterns like 'now-5d/d' or '+3M/h'.`, "attributes.expression");
+          push(msgs, "error",
+            `Unexpected token '${ch}' in expression '${s}'. ` +
+            "Valid forms: 'now', 'now-5d/d', 'now+1y+1M', '+3M', '+12h/s'.",
+            "attributes.expression"
+          );
           break;
         }
       }
 
+      // Expression must start with 'now', +, -, or /
       if (!startsWithNow && s !== "" && s[0] !== "+" && s[0] !== "-" && s[0] !== "/") {
-        push(msgs, "error", "Expression must start with 'now', '+', '-', or '/'.", "attributes.expression");
+        push(msgs, "error",
+          `Expression must start with 'now', '+', '-', or '/'. Got: '${s}'. ` +
+          "Examples: 'now-5d/d', '+3M', '-1y/d'.",
+          "attributes.expression"
+        );
       }
-      // Week rounding not supported (SailPoint docs)
+
+      // Week rounding is explicitly unsupported per docs
       if (roundUnit === "w") {
-        push(msgs, "error", "Rounding with 'w' (week) is not supported in dateMath expressions.", "attributes.expression");
+        push(msgs, "error",
+          "Rounding with 'w' (week) is not supported by SailPoint dateMath and will produce an error at runtime. " +
+          "Use a different unit for rounding (y, M, d, h, m, s).",
+          "attributes.expression"
+        );
       }
+
+      // Expression without 'now' and no ops is invalid
       if (!startsWithNow && !sawOp && !sawRound) {
-        push(msgs, "error", "Expression must contain 'now', at least one +/- term, or a rounding segment.", "attributes.expression");
+        push(msgs, "error",
+          "Expression must contain 'now', at least one +/- term, or a rounding segment. " +
+          "Examples: 'now', 'now-5d/d', '+3M/h'.",
+          "attributes.expression"
+        );
       }
+
+      // Expression without 'now' requires an input date
       if (!startsWithNow && attrs?.input === undefined) {
         push(msgs, "error",
-          "dateMath expression without 'now' requires an input date transform in attributes.input.",
+          "dateMath expression without 'now' requires an explicit input date via attributes.input (nested transform). " +
+          "The input must produce an ISO8601 UTC datetime. Use a dateFormat transform with outputFormat: 'ISO8601' if needed.",
           "attributes.input"
+        );
+      }
+
+      // Output format info — dateMath output is yyyy-MM-dd'T'HH:mm, not full ISO8601
+      push(msgs, "info",
+        "dateMath output format is 'yyyy-MM-dd\\'T\\'HH:mm' — this is NOT full ISO8601. " +
+        "If this transform feeds into another transform that expects ISO8601 (e.g., dateCompare), " +
+        "wrap it with a dateFormat transform using outputFormat: 'ISO8601'.",
+        "attributes.expression"
+      );
+
+      // Recommend requiresPeriodicRefresh when 'now' is used
+      if (startsWithNow) {
+        push(msgs, "info",
+          "Expression uses 'now'. Set requiresPeriodicRefresh: true at the transform root level " +
+          "so the date re-evaluates during nightly identity refresh — otherwise results may become stale.",
+          "attributes.expression"
         );
       }
     }
   }
 
+  // --- roundUp: boolean check ---
   if (attrs?.roundUp !== undefined && typeof attrs.roundUp !== "boolean") {
-    push(msgs, "error", "roundUp must be a boolean.", "attributes.roundUp");
+    push(msgs, "error",
+      "roundUp must be a boolean. true = round up (truncate + add one unit); false = truncate only (default).",
+      "attributes.roundUp"
+    );
   }
+
+  // --- roundUp without rounding operator has no effect ---
+  if (
+    attrs?.roundUp === true &&
+    typeof expr === "string" &&
+    !expr.includes("/")
+  ) {
+    push(msgs, "warn",
+      "roundUp is true but expression contains no rounding operator '/'. " +
+      "roundUp has no effect without '/'. Add a rounding segment (e.g., '/d') or remove roundUp.",
+      "attributes.roundUp"
+    );
+  }
+
+  // --- input: must be a nested transform object ---
   if (attrs?.input !== undefined) {
     const inp = attrs.input;
     if (!(inp && typeof inp === "object" && typeof inp.type === "string")) {
-      push(msgs, "warn", "input should be a nested transform object {type, attributes}.", "attributes.input");
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} that produces an ISO8601 UTC datetime. " +
+        "Use a dateFormat transform with outputFormat: 'ISO8601' if the source attribute is not already ISO8601.",
+        "attributes.input"
+      );
     }
+  }
+
+  // --- 'now' + input conflict warning ---
+  if (startsWithNow && attrs?.input !== undefined) {
+    push(msgs, "warn",
+      "Expression uses 'now' and an input attribute is also provided. " +
+      "Per SailPoint docs, when 'now' is in the expression the transform ignores the input attribute entirely.",
+      "attributes.input"
+    );
   }
 
   return msgs;

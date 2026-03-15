@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.dateMath.schema.json",
   "title": "SailPoint ISC Transform Schema - dateMath",
-  "description": "Strict schema derived from the SailPoint official Date Math operation documentation. Adds/subtracts/rounds components of an incoming ISO8601 UTC timestamp, or uses the keyword 'now'. Other considerations from docs: input must be ISO8601 UTC; rounding by 'week' is not supported; if 'now' is used and an 'input' attribute is also provided, the transform prefers 'now' and ignores 'input'. Output format is yyyy-MM-dd'T'HH:mm (not ISO8601); convert to ISO8601 via dateFormat when embedding in other transforms.",
+  "description": "Strict schema for the SailPoint ISC Date Math transform. Adds, subtracts, and rounds components of a datetime using 'now' or an explicit ISO8601 UTC input. IMPORTANT CONSTRAINTS: (1) Input must be ISO8601 UTC format (yyyy-MM-dd'T'HH:mm:ss.SSSZ). (2) Output format is 'yyyy-MM-dd\\'T\\'HH:mm' — NOT full ISO8601; wrap with dateFormat outputFormat: ISO8601 when nesting in other transforms. (3) Week rounding (/w) is not supported. (4) If expression uses 'now' and an input attribute is also provided, 'now' takes precedence and input is ignored.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "dateMath"
+      "const": "dateMath",
+      "description": "Transform operation type. Must be exactly 'dateMath'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. RECOMMENDED when expression uses 'now', so the computed date stays current. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -33,21 +35,17 @@
         "expression": {
           "type": "string",
           "minLength": 1,
-          "description": "Date-math expression. Allowed units: y, M, w, d, h, m, s and keyword 'now'. Allowed operators: +, -, / (round). Docs note rounding with week is not supported.",
-          "pattern": "^(?!.*\\/w)(?:now|[0-9yMwdhms+\\-\\/]+)$"
+          "pattern": "^(?!\\.*/w)(now[+\\-\\/0-9yMwdhms]*|[+\\-\\/][0-9yMwdhms+\\-\\/]*)$",
+          "description": "Date-math expression defining the operation. Valid time units: y(year) M(month) w(week) d(day) h(hour) m(minute) s(second). Keyword 'now' = current datetime (must be at start). Operators: +(add) -(subtract) /(round — must be last, NOT /w). No whitespace allowed. Examples: 'now' | 'now/h' | 'now-5d/d' | 'now+1w' | '+3M' | '+12h/s' | 'now+1y+1M+2d-4h+1m-3s/s'. NOTE: output is yyyy-MM-dd'T'HH:mm — wrap with dateFormat for ISO8601."
         },
         "roundUp": {
           "type": "boolean",
           "default": false,
-          "description": "When expression includes rounding '/', true rounds up (truncate + add one unit); false truncates only. Default false."
+          "description": "Controls rounding direction when the '/' operator is used. true = round up (truncate to unit then add one unit). false = round down (truncate only, default). Has NO effect if expression does not contain '/'."
         },
         "input": {
-          "description": "Explicitly defines the input data passed into the transform (nested transform object). If omitted, uses UI-configured input.",
-          "oneOf": [
-            {
-              "$ref": "#/$defs/NestedTransform"
-            }
-          ]
+          "description": "Nested transform providing the input datetime. Output of the nested transform must be ISO8601 UTC (yyyy-MM-dd'T'HH:mm:ss.SSSZ). Use a dateFormat transform with outputFormat: 'ISO8601' if the source attribute is not already ISO8601. IGNORED if expression contains 'now'.",
+          "$ref": "#/$defs/NestedTransform"
         }
       }
     }
@@ -55,7 +53,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used as explicit input. Docs examples frequently omit 'name' for nested transforms.",
+      "description": "A nested transform object whose output is the input datetime for this dateMath transform. Must produce an ISO8601 UTC string. Commonly wraps an accountAttribute through a dateFormat transform. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -63,18 +61,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'dateFormat', 'accountAttribute')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -86,16 +88,33 @@
   },
   "examples": [
     {
+      "name": "Five Days Ago Rounded to Day",
       "type": "dateMath",
-      "name": "Date Math Transform",
+      "requiresPeriodicRefresh": true,
       "attributes": {
         "expression": "now-5d/d",
         "roundUp": false
       }
     },
     {
+      "name": "Current Time Rounded to Hour",
       "type": "dateMath",
-      "name": "Date Math Transform (Explicit Input)",
+      "requiresPeriodicRefresh": true,
+      "attributes": {
+        "expression": "now/h"
+      }
+    },
+    {
+      "name": "One Week From Now",
+      "type": "dateMath",
+      "requiresPeriodicRefresh": true,
+      "attributes": {
+        "expression": "now+1w"
+      }
+    },
+    {
+      "name": "Add 12 Hours to Source Date Rounded to Second",
+      "type": "dateMath",
       "attributes": {
         "expression": "+12h/s",
         "roundUp": true,
@@ -113,6 +132,14 @@
             "outputFormat": "ISO8601"
           }
         }
+      }
+    },
+    {
+      "name": "Complex: Add 1 Year 1 Month 2 Days Minus 4 Hours Rounded to Second",
+      "type": "dateMath",
+      "requiresPeriodicRefresh": true,
+      "attributes": {
+        "expression": "now+1y+1M+2d-4h+1m-3s/s"
       }
     }
   ]
