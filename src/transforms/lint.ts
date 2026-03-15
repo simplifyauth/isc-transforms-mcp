@@ -619,24 +619,86 @@ function lintReplace(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 8. replaceAll — table validation
+// 8. replaceAll — regex key validation, value type, case-sensitivity info
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/replace-all
 // ---------------------------------------------------------------------------
 
 function lintReplaceAll(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
+
   if (attrs?.table !== undefined) {
     if (!isPlainObject(attrs.table) || Array.isArray(attrs.table)) {
-      push(msgs, "error", "table must be an object map of key → value string pairs.", "attributes.table");
+      push(msgs, "error",
+        "table must be an object map where keys are regex patterns and values are replacement strings " +
+        "(e.g., {\"[aeiou]\": \"\", \"\\\\s+\": \"_\"}). Keys are interpreted as standard Java regular expressions.",
+        "attributes.table"
+      );
     } else {
-      const badEntries = Object.entries(attrs.table).filter(([, v]) => typeof v !== "string");
-      if (badEntries.length) {
-        push(msgs, "error",
-          `All table values must be strings. Non-string entries: ${badEntries.map(([k]) => k).join(", ")}.`,
+      const entries = Object.entries(attrs.table);
+
+      // 1. Empty table
+      if (entries.length === 0) {
+        push(msgs, "warn",
+          "replaceAll table is empty. Add at least one regex pattern key and its replacement string value.",
           "attributes.table"
         );
+      } else {
+        // 2. All values must be strings (replacement text; empty string is valid — deletes all matches)
+        const badVals = entries.filter(([, v]) => typeof v !== "string");
+        if (badVals.length) {
+          push(msgs, "error",
+            `All table values must be strings (the replacement text). Non-string entries: ${badVals.map(([k]) => `'${k}'`).join(", ")}. ` +
+            "Use an empty string \"\" as the value to delete all text that matches the pattern.",
+            "attributes.table"
+          );
+        }
+
+        // 3. Validate each key as a compilable Java-compatible regex (JS RegExp is a close proxy)
+        for (const [key] of entries) {
+          try {
+            new RegExp(key);
+          } catch (e: any) {
+            push(msgs, "error",
+              `table key '${key}' is not a valid regex pattern: ${e?.message ?? String(e)}. ` +
+              "All table keys are interpreted as Java regular expressions. " +
+              "Use bracket notation to match literal special characters (e.g., '[.]' for a literal dot, '[+]' for a literal plus).",
+              "attributes.table"
+            );
+          }
+        }
+
+        // 4. Case-sensitivity info — comparisons are case-sensitive by default
+        push(msgs, "info",
+          "replaceAll pattern matching is case-sensitive by default. " +
+          "To match both cases, use a character class (e.g., '[Aa]bc' matches 'Abc' or 'abc') or include separate table entries for each case variant.",
+          "attributes.table"
+        );
+
+        // 5. Simultaneous replacement info — all patterns apply in one pass
+        if (entries.length > 1) {
+          push(msgs, "info",
+            "replaceAll applies all pattern replacements simultaneously in a single pass. " +
+            "Each pattern matches against the original input — not against output already modified by a previous pattern. " +
+            "Order of entries does not affect which text is matched.",
+            "attributes.table"
+          );
+        }
       }
     }
   }
+
+  // 6. input: validate type if provided
+  if (attrs?.input !== undefined) {
+    const inp = attrs.input;
+    if (!(typeof inp === "string" || (isPlainObject(inp) && typeof (inp as any).type === "string"))) {
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} providing the string to apply replacements to, or a static string. " +
+        "If omitted, the transform uses the source+attribute combination configured in the identity profile UI.",
+        "attributes.input"
+      );
+    }
+  }
+
   return msgs;
 }
 
