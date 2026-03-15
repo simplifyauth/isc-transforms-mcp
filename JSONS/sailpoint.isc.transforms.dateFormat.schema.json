@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.dateFormat.schema.json",
   "title": "SailPoint ISC Transform Schema - dateFormat",
-  "description": "Strict schema derived from SailPoint official Date Format operation documentation. Converts datetime strings from one format to another. inputFormat/outputFormat may be Java SimpleDateFormat patterns or built-in named formats (ISO8601, LDAP, PEOPLE_SOFT, EPOCH_TIME_JAVA, EPOCH_TIME_WIN32). Note: The docs state this transform does not support the 'now' keyword as an input value.",
+  "description": "Strict schema for the SailPoint ISC Date Format transform. Converts a datetime string from one format to another using Java SimpleDateFormat patterns or 5 named formats: ISO8601, LDAP, PEOPLE_SOFT, EPOCH_TIME_JAVA, EPOCH_TIME_WIN32. IMPORTANT: The 'now' keyword is NOT supported as an input value for this transform.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,55 +11,61 @@
   ],
   "properties": {
     "type": {
-      "const": "dateFormat"
+      "const": "dateFormat",
+      "description": "Transform operation type. Must be exactly 'dateFormat'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform logic should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
-      "description": "Date format configuration (optional). If omitted, inputFormat and outputFormat default to ISO8601.",
+      "description": "Date format configuration. All attributes are optional — inputFormat and outputFormat both default to ISO8601 if omitted.",
       "additionalProperties": false,
       "properties": {
         "inputFormat": {
           "default": "ISO8601",
-          "description": "Format of the incoming date. Must be one of the 5 named formats or a Java SimpleDateFormat pattern.",
+          "description": "Format of the incoming date string. Default is ISO8601. Accepts one of the 5 named formats OR any Java SimpleDateFormat pattern. Named formats: ISO8601 (yyyy-MM-dd'T'HH:mm:ss.SSSZ), LDAP (yyyyMMddHHmmss.Z), PEOPLE_SOFT (MM/dd/yyyy), EPOCH_TIME_JAVA (milliseconds since Jan 1 1970), EPOCH_TIME_WIN32 (100-nanosecond intervals since Jan 1 1601).",
           "anyOf": [
             {
               "enum": ["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"],
-              "description": "Built-in named format."
+              "description": "Built-in named format. ISO8601=yyyy-MM-dd'T'HH:mm:ss.SSSZ, LDAP=yyyyMMddHHmmss.Z, PEOPLE_SOFT=MM/dd/yyyy, EPOCH_TIME_JAVA=ms since 1970, EPOCH_TIME_WIN32=100ns intervals since 1601."
             },
             {
               "type": "string",
               "not": { "pattern": "^[A-Z][A-Z0-9_]+$" },
-              "description": "Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ)."
+              "description": "Java SimpleDateFormat pattern (e.g. 'M/d/yyyy', 'dd-MM-yyyy', \"yyyy-MM-dd'T'HH:mm:ssZ\"). Must contain at least one date token."
             }
           ]
         },
         "outputFormat": {
           "default": "ISO8601",
-          "description": "Desired output format. Must be one of the 5 named formats or a Java SimpleDateFormat pattern.",
+          "description": "Desired output format. Default is ISO8601. Accepts one of the 5 named formats OR any Java SimpleDateFormat pattern. Named formats: ISO8601 (yyyy-MM-dd'T'HH:mm:ss.SSSZ), LDAP (yyyyMMddHHmmss.Z), PEOPLE_SOFT (MM/dd/yyyy), EPOCH_TIME_JAVA (milliseconds since Jan 1 1970), EPOCH_TIME_WIN32 (100-nanosecond intervals since Jan 1 1601).",
           "anyOf": [
             {
               "enum": ["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"],
-              "description": "Built-in named format."
+              "description": "Built-in named format. ISO8601=yyyy-MM-dd'T'HH:mm:ss.SSSZ, LDAP=yyyyMMddHHmmss.Z, PEOPLE_SOFT=MM/dd/yyyy, EPOCH_TIME_JAVA=ms since 1970, EPOCH_TIME_WIN32=100ns intervals since 1601."
             },
             {
               "type": "string",
               "not": { "pattern": "^[A-Z][A-Z0-9_]+$" },
-              "description": "Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ)."
+              "description": "Java SimpleDateFormat pattern (e.g. 'yyyy-MM-dd', \"yyyy-MM-dd'T'HH:mm:ssZ\"). Must contain at least one date token."
             }
           ]
         },
         "input": {
-          "description": "Explicitly defines the input data passed into the transform. Docs specify an object; in practice this is a nested transform object. If omitted, the transform uses the UI-configured source+attribute input.",
-          "oneOf": [
+          "description": "Explicitly defines the input data passed into the transform. Can be a static date string matching the inputFormat pattern, or a nested transform object whose output is a date string. NOTE: The 'now' keyword is NOT supported by dateFormat — use dateMath instead for current-time operations.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Static date string that matches the inputFormat pattern (e.g., '4/1/1975' for inputFormat 'M/d/yyyy', or '144642632190' for EPOCH_TIME_JAVA). The 'now' keyword is NOT supported."
+            },
             {
               "$ref": "#/$defs/NestedTransform"
             }
@@ -71,7 +77,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used for explicit input.",
+      "description": "A nested transform object whose output is used as the input date string for this dateFormat transform. Common use: accountAttribute to pull a date from a source, or dateMath to compute a relative date. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -79,18 +85,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'dateMath', 'static')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -102,19 +112,51 @@
   },
   "examples": [
     {
+      "name": "Java Epoch to ISO8601",
       "type": "dateFormat",
-      "name": "Date Format Transform",
       "attributes": {
         "inputFormat": "EPOCH_TIME_JAVA",
         "outputFormat": "ISO8601"
       }
     },
     {
+      "name": "US Date to Database Format",
       "type": "dateFormat",
-      "name": "Date Format Transform (US date to DB)",
       "attributes": {
         "inputFormat": "M/d/yyyy",
         "outputFormat": "yyyy-MM-dd"
+      }
+    },
+    {
+      "name": "Static Date String Conversion",
+      "type": "dateFormat",
+      "attributes": {
+        "input": "12/31/1995",
+        "inputFormat": "M/d/yyyy",
+        "outputFormat": "ISO8601"
+      }
+    },
+    {
+      "name": "Source Hire Date to ISO8601",
+      "type": "dateFormat",
+      "attributes": {
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "hire_date"
+          }
+        },
+        "inputFormat": "MM/dd/yyyy",
+        "outputFormat": "ISO8601"
+      }
+    },
+    {
+      "name": "PeopleSoft Date to LDAP Format",
+      "type": "dateFormat",
+      "attributes": {
+        "inputFormat": "PEOPLE_SOFT",
+        "outputFormat": "LDAP"
       }
     }
   ]

@@ -782,9 +782,22 @@ function lintDateCompare(attrs: any): LintMessage[] {
 
 function lintDateFormat(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
+
   // Exact set of named formats per SailPoint docs — no variants accepted.
   const NAMED_FORMATS = new Set(["ISO8601", "LDAP", "PEOPLE_SOFT", "EPOCH_TIME_JAVA", "EPOCH_TIME_WIN32"]);
-  // A value that is ALL_CAPS_WITH_UNDERSCORES is clearly intended as a named constant, not a pattern.
+
+  // Human-readable descriptions for each named format (shown as info when used correctly)
+  const NAMED_FORMAT_DESCRIPTIONS: Record<string, string> = {
+    ISO8601:          "yyyy-MM-dd'T'HH:mm:ss.SSSZ — ISO 8601 standard datetime",
+    LDAP:             "yyyyMMddHHmmss.Z — LDAP directory format",
+    PEOPLE_SOFT:      "MM/dd/yyyy — PeopleSoft system format",
+    EPOCH_TIME_JAVA:  "milliseconds since Jan 1, 1970 (Java epoch) — input must be a numeric string",
+    EPOCH_TIME_WIN32: "100-nanosecond intervals since Jan 1, 1601 (Windows/Win32 epoch) — input must be a numeric string",
+  };
+
+  // ALL_CAPS_WITH_UNDERSCORES values are clearly intended as named constants, not patterns.
+  // Do NOT fall through to isLikelyPattern — e.g. EPOCH_TIME_JAVA_IN_MILLIS contains
+  // 'H' and 'M' and would falsely pass the pattern check.
   const looksLikeNamedConstant = (s: string) => /^[A-Z][A-Z0-9_]+$/.test(s);
   const isLikelyPattern = (s: string) => /[yMdHhmsSZ]/.test(s);
 
@@ -792,28 +805,35 @@ function lintDateFormat(attrs: any): LintMessage[] {
     const raw = attrs?.[field];
     if (raw === undefined) return;
     if (typeof raw !== "string") {
-      push(msgs, "error", `${field} must be a string (named format or pattern).`, `attributes.${field}`);
+      push(msgs, "error",
+        `${field} must be a string — either a named format (${Array.from(NAMED_FORMATS).join(", ")}) or a Java SimpleDateFormat pattern.`,
+        `attributes.${field}`
+      );
       return;
     }
     const t = raw.trim();
-    // If the value looks like a named constant (ALL_CAPS_UNDERSCORES), validate strictly.
-    // Do NOT fall through to isLikelyPattern — e.g. EPOCH_TIME_JAVA_IN_MILLIS contains
-    // 'H' and 'M' and would falsely pass the pattern check.
     if (looksLikeNamedConstant(t)) {
       if (!NAMED_FORMATS.has(t)) {
         push(msgs, "error",
           `'${t}' is not a valid named format for ${field}. ` +
           `Allowed named formats: ${Array.from(NAMED_FORMATS).join(", ")}. ` +
-          `Alternatively, use a Java SimpleDateFormat pattern (e.g. dd-MM-yyyy, yyyy-MM-dd'T'HH:mm:ssZ).`,
+          `Alternatively, use a Java SimpleDateFormat pattern (e.g. 'dd-MM-yyyy', 'yyyy-MM-dd\\'T\\'HH:mm:ssZ').`,
+          `attributes.${field}`
+        );
+      } else {
+        push(msgs, "info",
+          `${field} '${t}' → ${NAMED_FORMAT_DESCRIPTIONS[t]}.`,
           `attributes.${field}`
         );
       }
       return;
     }
-    // Value looks like a date pattern — check it has at least one date token.
+    // Value looks like a date pattern — check it has at least one recognisable date token.
     if (!isLikelyPattern(t)) {
       push(msgs, "warn",
-        `${field} '${t}' doesn't match a known named format and doesn't look like a date pattern (missing tokens like y/M/d/H).`,
+        `${field} '${t}' doesn't match a known named format and doesn't look like a Java SimpleDateFormat pattern ` +
+        "(expected tokens like y, M, d, H, h, m, s, S, Z). " +
+        `Valid named formats: ${Array.from(NAMED_FORMATS).join(", ")}.`,
         `attributes.${field}`
       );
     }
@@ -822,12 +842,47 @@ function lintDateFormat(attrs: any): LintMessage[] {
   checkFmt("inputFormat");
   checkFmt("outputFormat");
 
+  // --- EPOCH format input reminders ---
+  const inFmt = attrs?.inputFormat;
+  if (typeof inFmt === "string" && (inFmt === "EPOCH_TIME_JAVA" || inFmt === "EPOCH_TIME_WIN32")) {
+    push(msgs, "info",
+      `inputFormat '${inFmt}' expects a numeric string as input — ` +
+      (inFmt === "EPOCH_TIME_JAVA"
+        ? "milliseconds since Jan 1, 1970 (e.g., '1609459200000')."
+        : "100-nanosecond intervals since Jan 1, 1601 (Windows FILETIME)."),
+      "attributes.inputFormat"
+    );
+  }
+
+  // --- input: validate type, reject 'now', guide on valid forms ---
   if (attrs?.input !== undefined) {
     const inp = attrs.input;
-    if (typeof inp === "object" && inp !== null && typeof (inp as any).type !== "string") {
-      push(msgs, "warn", "input looks like an object but is missing a nested transform 'type'.", "attributes.input");
-    } else if (typeof inp !== "string" && !isPlainObject(inp)) {
-      push(msgs, "warn", "input should be a string or a nested transform object.", "attributes.input");
+
+    if (typeof inp === "string") {
+      // 'now' is explicitly NOT supported by dateFormat per official docs
+      if (inp.trim().toLowerCase() === "now") {
+        push(msgs, "error",
+          "dateFormat does not support 'now' as an input value (official docs limitation). " +
+          "To derive a date from the current time, use a dateMath transform producing an ISO8601 string " +
+          "and reference it as a nested transform in the input field.",
+          "attributes.input"
+        );
+      }
+      // A static date string is valid — no further warning needed
+    } else if (isPlainObject(inp)) {
+      if (typeof (inp as any).type !== "string") {
+        push(msgs, "warn",
+          "input is an object but is missing a 'type' field — it does not look like a valid nested transform. " +
+          "Add a 'type' (e.g., 'accountAttribute', 'dateMath') to make it a proper nested transform.",
+          "attributes.input"
+        );
+      }
+      // Otherwise it's a well-formed nested transform — no warning
+    } else {
+      push(msgs, "warn",
+        "input should be a static date string matching inputFormat, or a nested transform object {type, attributes}.",
+        "attributes.input"
+      );
     }
   }
 
