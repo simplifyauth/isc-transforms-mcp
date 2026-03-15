@@ -1247,30 +1247,91 @@ function lintIso3166(attrs: any): LintMessage[] {
 }
 
 // ---------------------------------------------------------------------------
-// 18. lookup — table validation + default key warning
+// 18. lookup — table validation, default key, case-sensitivity, input
+// Docs: https://developer.sailpoint.com/docs/extensibility/transforms/operations/lookup
 // ---------------------------------------------------------------------------
 
 function lintLookup(attrs: any): LintMessage[] {
   const msgs: LintMessage[] = [];
+
   if (attrs?.table !== undefined) {
     if (!isPlainObject(attrs.table)) {
-      push(msgs, "error", "table must be an object map of key → string value.", "attributes.table");
+      push(msgs, "error",
+        "table must be an object map of string keys to string output values (e.g., {\"US\": \"United States\", \"default\": \"Unknown\"}). " +
+        "Nested transforms and conditional logic are not supported as table values.",
+        "attributes.table"
+      );
     } else {
+      const tableKeys = Object.keys(attrs.table);
+
+      // 1. default key is mandatory per docs — unmatched input causes a runtime error without it
       if (!Object.prototype.hasOwnProperty.call(attrs.table, "default")) {
-        push(msgs, "warn",
-          "lookup table is missing a 'default' key. Without it, the transform errors if input doesn't match any key.",
+        push(msgs, "error",
+          "lookup table must include a 'default' key. Without it, any input that doesn't match a table key " +
+          "causes a runtime error. Add: \"default\": \"<fallback value>\".",
           "attributes.table"
         );
       }
+
+      // 2. All values must be strings — nested transforms and dynamic values are not supported
       const badVals = Object.entries(attrs.table).filter(([, v]) => typeof v !== "string");
       if (badVals.length) {
         push(msgs, "error",
-          `All lookup table values must be strings. Non-string entries: ${badVals.map(([k]) => k).join(", ")}.`,
+          `All lookup table values must be static strings. Non-string entries: ${badVals.map(([k]) => `'${k}'`).join(", ")}. ` +
+          "Nested transforms and conditional logic inside table values are not supported.",
+          "attributes.table"
+        );
+      }
+
+      // 3. Empty table (no keys at all — can't happen if default is required, but guard anyway)
+      if (tableKeys.length === 0) {
+        push(msgs, "error",
+          "lookup table is empty. Add at least a 'default' key and one or more mapping entries.",
+          "attributes.table"
+        );
+      // 4. Table has only a default key — no lookup entries, always returns default
+      } else if (tableKeys.length === 1 && tableKeys[0] === "default") {
+        push(msgs, "warn",
+          "lookup table contains only a 'default' key with no other mapping entries. " +
+          "This will always return the default value regardless of input. " +
+          "If you want a fixed output, use a static transform instead.",
+          "attributes.table"
+        );
+      }
+
+      // 5. Empty-string key — unusual, only matches when input is an empty string
+      if (tableKeys.includes("")) {
+        push(msgs, "warn",
+          "lookup table contains an empty-string key (\"\"). This matches only when the input value is an empty string. " +
+          "If unintentional, remove it.",
+          "attributes.table"
+        );
+      }
+
+      // 6. Case-sensitivity info — only when there are real mapping entries
+      if (tableKeys.filter(k => k !== "default").length > 0) {
+        push(msgs, "info",
+          "Lookup table comparisons are case-sensitive — table keys must match the input value exactly. " +
+          "'US' and 'us' are treated as different keys. " +
+          "If case may vary in the input, normalize it first with a lower or upper transform.",
           "attributes.table"
         );
       }
     }
   }
+
+  // 7. input: validate type if provided
+  if (attrs?.input !== undefined) {
+    const inp = attrs.input;
+    if (!(typeof inp === "string" || (isPlainObject(inp) && typeof (inp as any).type === "string"))) {
+      push(msgs, "warn",
+        "input must be a nested transform object {type, attributes} that provides the value to look up, or a static string. " +
+        "If omitted, the transform uses the source+attribute combination configured in the identity profile UI.",
+        "attributes.input"
+      );
+    }
+  }
+
   return msgs;
 }
 

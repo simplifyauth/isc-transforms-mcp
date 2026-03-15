@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sailpoint.isc.transforms.lookup.schema.json",
   "title": "SailPoint ISC Transform Schema - lookup",
-  "description": "Strict schema derived from the SailPoint official Lookup operation documentation. Lookup returns a value from a key/value table using the incoming value as the key. Per docs, the table must include a 'default' key to avoid runtime errors when the lookup key is missing.",
+  "description": "Strict schema for the SailPoint ISC Lookup transform. Maps an incoming string value against a static key-value table and returns the corresponding output. If the input matches a table key, that key's value is returned. If no key matches, the 'default' key's value is returned. IMPORTANT: The 'default' key is mandatory — without it, any unmatched input causes a runtime error. Table comparisons are case-sensitive. Only static string values are supported in the table — nested transforms and conditional logic within table values are not supported.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,16 +12,18 @@
   ],
   "properties": {
     "type": {
-      "const": "lookup"
+      "const": "lookup",
+      "description": "Transform operation type. Must be exactly 'lookup'."
     },
     "name": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Display name for this transform, shown in UI dropdowns and identity profile mappings."
     },
     "requiresPeriodicRefresh": {
       "type": "boolean",
       "default": false,
-      "description": "Whether the transform should be reevaluated nightly as part of identity refresh. Default false."
+      "description": "If true, re-evaluates this transform during the nightly identity refresh cycle. Default is false."
     },
     "attributes": {
       "type": "object",
@@ -29,21 +31,32 @@
       "required": [
         "table"
       ],
+      "description": "Required container for lookup operation attributes.",
       "properties": {
         "table": {
           "type": "object",
-          "description": "Map of input keys to output values. Must include 'default'.",
-          "additionalProperties": {
-            "type": "string",
-            "description": "Lookup output value."
-          },
+          "description": "Required key-value mapping object. The key is the string the transform tries to match against the input value; the corresponding string value is returned on a match. MANDATORY: Must include a 'default' key — without it, any input that doesn't match a key causes a runtime error. Rules: (1) All values must be static strings — nested transforms are not supported. (2) Comparisons are case-sensitive: 'US' and 'us' are different keys. (3) Duplicate keys are not permitted. (4) Multiple keys may map to the same output value.",
           "required": [
             "default"
-          ]
+          ],
+          "properties": {
+            "default": {
+              "type": "string",
+              "description": "Mandatory fallback value returned when the input does not match any other key in the table. Prevents runtime errors on unmatched input."
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "description": "Output string value returned when the input matches this key. The key is compared case-sensitively against the input value."
+          }
         },
         "input": {
-          "description": "Optional explicit input to use as the lookup key (nested transform). If omitted, uses UI-configured input.",
-          "oneOf": [
+          "description": "Optional explicit input that provides the string value to look up in the table. If omitted, the transform uses the source and attribute combination configured in the identity profile UI. When provided, must be a nested transform object or a static string.",
+          "anyOf": [
+            {
+              "type": "string",
+              "description": "Static string value to use as the lookup key."
+            },
             {
               "$ref": "#/$defs/NestedTransform"
             }
@@ -55,7 +68,7 @@
   "$defs": {
     "NestedTransform": {
       "type": "object",
-      "description": "Nested transform object used for explicit input (name optional in docs).",
+      "description": "A nested transform object that provides the input value to look up. Its output string is matched against the table keys. Common use: accountAttribute or identityAttribute to supply a source value for the lookup. The 'name' field is optional in nested transforms per SailPoint docs.",
       "additionalProperties": false,
       "required": [
         "type",
@@ -63,18 +76,22 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional ID when referencing an existing saved transform."
         },
         "name": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional display name for the nested transform."
         },
         "type": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The operation type of the nested transform (e.g., 'accountAttribute', 'identityAttribute', 'lower')."
         },
         "requiresPeriodicRefresh": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether this nested transform re-evaluates during nightly refresh."
         },
         "attributes": {
           "type": "object",
@@ -86,13 +103,70 @@
   },
   "examples": [
     {
+      "name": "Country Code to Country Name",
       "type": "lookup",
-      "name": "Lookup Transform",
       "attributes": {
         "table": {
           "US": "United States",
           "IN": "India",
+          "GB": "United Kingdom",
+          "AU": "Australia",
           "default": "Unknown"
+        }
+      }
+    },
+    {
+      "name": "Department Code to Building",
+      "type": "lookup",
+      "attributes": {
+        "table": {
+          "ENG": "Building A",
+          "HR": "Building B",
+          "FIN": "Building C",
+          "default": "Main Campus"
+        }
+      }
+    },
+    {
+      "name": "Employment Type with Nested Input",
+      "type": "lookup",
+      "attributes": {
+        "table": {
+          "FTE": "Full-Time Employee",
+          "PTE": "Part-Time Employee",
+          "CON": "Contractor",
+          "default": "Unknown"
+        },
+        "input": {
+          "type": "accountAttribute",
+          "attributes": {
+            "sourceName": "HR Source",
+            "attributeName": "employeeType"
+          }
+        }
+      }
+    },
+    {
+      "name": "Case-Normalized Status Lookup",
+      "type": "lookup",
+      "attributes": {
+        "table": {
+          "active": "Active",
+          "inactive": "Inactive",
+          "pending": "Pending Activation",
+          "default": "Unknown Status"
+        },
+        "input": {
+          "type": "lower",
+          "attributes": {
+            "input": {
+              "type": "accountAttribute",
+              "attributes": {
+                "sourceName": "HR Source",
+                "attributeName": "status"
+              }
+            }
+          }
         }
       }
     }
