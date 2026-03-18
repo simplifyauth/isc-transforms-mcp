@@ -45,11 +45,14 @@ const RULES: AllowRule[] = [
 ];
 
 export function isAllowed(mode: McpMode, method: HttpMethod, path: string): boolean {
-  return RULES.some(r =>
-    r.method === method &&
-    path.startsWith(r.pathPrefix) &&
-    r.modes.includes(mode)
-  );
+  return RULES.some(r => {
+    if (r.method !== method || !r.modes.includes(mode)) return false;
+    if (!path.startsWith(r.pathPrefix)) return false;
+    // Ensure prefix is followed by end-of-string, '/', or '?' to prevent
+    // matching unintended paths (e.g. /v3/transforms-evil matching /v3/transforms)
+    const rest = path.slice(r.pathPrefix.length);
+    return rest === "" || rest[0] === "/" || rest[0] === "?";
+  });
 }
 
 export function getAllowlist(): AllowRule[] {

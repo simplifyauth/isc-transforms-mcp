@@ -17,7 +17,9 @@
 //     }
 //   }
 
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { buildMcpServer } from "./index.js";
 import { lookupApiKey } from "./apikeys.js";
@@ -54,7 +56,22 @@ function buildConfigForKey(tier: "personal" | "enterprise") {
 // Express app
 // ---------------------------------------------------------------------------
 const app = express();
-app.use(express.json());
+
+// CORS — restrict to known origins in production via ALLOWED_ORIGINS env var
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()).filter(Boolean);
+app.use(cors(allowedOrigins?.length ? { origin: allowedOrigins } : undefined));
+
+// Rate limiting — prevent brute-force and DoS
+const limiter = rateLimit({
+  windowMs: 60_000,
+  max: parseInt(process.env.RATE_LIMIT_RPM ?? "60", 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." },
+});
+app.use(limiter);
+
+app.use(express.json({ limit: "1mb" }));
 
 // Health endpoint (no auth required)
 app.get("/health", (_req, res) => {
@@ -100,8 +117,18 @@ app.all("/mcp", async (req: Request, res: Response) => {
     await transport.handleRequest(req, res, req.body);
   } catch (err: any) {
     if (!res.headersSent) {
-      res.status(500).json({ error: String(err?.message ?? err) });
+      console.error("[mcp] request error:", err);
+      res.status(500).json({ error: "Internal server error" });
     }
+  }
+});
+
+// Global error handler — prevent Express from leaking stack traces
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("[express] unhandled error:", err);
+  if (!res.headersSent) {
+    const status = typeof err.status === "number" ? err.status : 500;
+    res.status(status).json({ error: status === 413 ? "Payload too large" : "Internal server error" });
   }
 });
 

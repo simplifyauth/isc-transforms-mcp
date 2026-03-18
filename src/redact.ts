@@ -4,7 +4,14 @@ const SECRET_KEYS = new Set([
   "refresh_token",
   "client_secret",
   "secret",
-  "token"
+  "token",
+  "password",
+  "api_key",
+  "apikey",
+  "bearer",
+  "pat_client_secret",
+  "credential",
+  "credentials",
 ]);
 
 export function redactDeep<T>(obj: T): T {

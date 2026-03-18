@@ -8,6 +8,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { randomBytes } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Resolve to <project-root>/data/apikeys.json regardless of whether we're in
@@ -91,7 +92,9 @@ export function listApiKeys(): Array<{ key: string } & ApiKeyRecord> {
  */
 export function generateApiKey(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const seg = () =>
-    Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const seg = () => {
+    const bytes = randomBytes(4);
+    return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+  };
   return `ISC-${seg()}-${seg()}-${seg()}-${seg()}`;
 }
